@@ -181,6 +181,43 @@ func TestSetSPA(t *testing.T) {
 	}
 }
 
+func TestSetQuota(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	p, err := s.Create(ctx, "alpha", "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if p.QuotaBytes != 0 {
+		t.Fatalf("new project should default to quota=0 (unlimited), got %d", p.QuotaBytes)
+	}
+
+	if err := s.SetQuota(ctx, "alpha", 5<<20); err != nil {
+		t.Fatalf("SetQuota: %v", err)
+	}
+	got, err := s.Get(ctx, "alpha")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.QuotaBytes != 5<<20 {
+		t.Errorf("quota = %d, want %d", got.QuotaBytes, 5<<20)
+	}
+
+	// Negative quotas clamp to 0 (unlimited).
+	if err := s.SetQuota(ctx, "alpha", -1); err != nil {
+		t.Fatalf("SetQuota negative: %v", err)
+	}
+	got, _ = s.Get(ctx, "alpha")
+	if got.QuotaBytes != 0 {
+		t.Errorf("negative quota = %d, want 0", got.QuotaBytes)
+	}
+
+	if err := s.SetQuota(ctx, "missing", 1); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetQuota missing: got %v, want ErrNotFound", err)
+	}
+}
+
 func TestDelete(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

@@ -88,6 +88,18 @@ func (a *Aviary) apiDeployProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce the project's storage quota against the fully-staged tree (which,
+	// for an overlay, includes the retained existing files) before swapping.
+	if p, perr := a.store.Get(r.Context(), id); perr == nil && p.QuotaBytes > 0 {
+		staged, _, derr := dirSize(staging)
+		if derr == nil && !withinQuota(p.QuotaBytes, staged) {
+			a.apiError(w, http.StatusInsufficientStorage,
+				"storage quota exceeded: this deploy would use "+formatBytes(staged)+
+					" of the "+formatBytes(p.QuotaBytes)+" quota")
+			return
+		}
+	}
+
 	if err := swapDir(publicDir, staging); err != nil {
 		a.apiError(w, http.StatusInternalServerError, "cannot publish deploy: "+err.Error())
 		return

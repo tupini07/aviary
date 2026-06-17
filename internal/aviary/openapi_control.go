@@ -197,6 +197,15 @@ func controlOpenAPI(serverURL string) oa {
 				"responses":   oa{"200": oa{"description": "Deploy published", "content": jsonBody(ref("DeployResult"))["content"]}, "400": errResp("Invalid or unsupported archive"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found"), "413": errResp("Archive exceeds the upload limit")},
 			},
 		},
+		"/api/projects/{id}/metrics": oa{
+			"get": oa{
+				"tags": []any{"files"}, "summary": "Storage usage and quota for a project",
+				"description": "Reports the project's total data-directory size, its pb_public static-file usage and file count, the remaining PocketBase data size, the configured pb_public quota (0 = unlimited), and whether the cage is currently booted. Accepts a session cookie or a project-scoped API key.",
+				"security":    cookieOrKey,
+				"parameters":  []any{idParam},
+				"responses":   oa{"200": oa{"description": "Project metrics", "content": jsonBody(ref("ProjectMetrics"))["content"]}, "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found")},
+			},
+		},
 		"/api/projects/{id}/keys": oa{
 			"get": oa{
 				"tags": []any{"keys"}, "summary": "List a project's API keys",
@@ -333,12 +342,13 @@ func controlOpenAPI(serverURL string) oa {
 				"Project": oa{
 					"type": "object",
 					"properties": oa{
-						"id":      oa{"type": "string"},
-						"name":    oa{"type": "string"},
-						"status":  oa{"type": "string", "enum": []any{"active", "disabled"}},
-						"spa":     oa{"type": "boolean", "description": "Serve index.html for unmatched paths (single-page-app fallback)."},
-						"created": oa{"type": "string", "format": "date-time"},
-						"updated": oa{"type": "string", "format": "date-time"},
+						"id":         oa{"type": "string"},
+						"name":       oa{"type": "string"},
+						"status":     oa{"type": "string", "enum": []any{"active", "disabled"}},
+						"spa":        oa{"type": "boolean", "description": "Serve index.html for unmatched paths (single-page-app fallback)."},
+						"quotaBytes": oa{"type": "integer", "format": "int64", "description": "pb_public storage quota in bytes; 0 means unlimited."},
+						"created":    oa{"type": "string", "format": "date-time"},
+						"updated":    oa{"type": "string", "format": "date-time"},
 					},
 				},
 				"ProjectView": oa{
@@ -358,9 +368,10 @@ func controlOpenAPI(serverURL string) oa {
 				"PatchProject": oa{
 					"type": "object",
 					"properties": oa{
-						"name":   oa{"type": "string"},
-						"status": oa{"type": "string", "enum": []any{"active", "disabled"}},
-						"spa":    oa{"type": "boolean", "description": "Toggle single-page-app fallback; reboots the project."},
+						"name":       oa{"type": "string"},
+						"status":     oa{"type": "string", "enum": []any{"active", "disabled"}},
+						"spa":        oa{"type": "boolean", "description": "Toggle single-page-app fallback; reboots the project."},
+						"quotaBytes": oa{"type": "integer", "format": "int64", "description": "pb_public storage quota in bytes; 0 means unlimited."},
 					},
 				},
 				"Passkey": oa{
@@ -424,6 +435,19 @@ func controlOpenAPI(serverURL string) oa {
 						"mode":  oa{"type": "string", "enum": []any{"overlay", "replace"}, "description": "Whether the archive was overlaid on existing files or replaced them."},
 						"files": oa{"type": "integer", "description": "Number of files extracted and published."},
 						"bytes": oa{"type": "integer", "format": "int64", "description": "Total uncompressed bytes written."},
+					},
+				},
+				"ProjectMetrics": oa{
+					"type": "object",
+					"properties": oa{
+						"running":       oa{"type": "boolean", "description": "Whether the project's cage is currently booted."},
+						"lastActive":    oa{"type": []any{"string", "null"}, "format": "date-time", "description": "When the cage last served a request, or null if not running."},
+						"storageBytes":  oa{"type": "integer", "format": "int64", "description": "Total size of the project's data directory."},
+						"publicBytes":   oa{"type": "integer", "format": "int64", "description": "Bytes used by pb_public static files."},
+						"databaseBytes": oa{"type": "integer", "format": "int64", "description": "Bytes used by PocketBase databases, logs and hooks (storage minus public)."},
+						"publicFiles":   oa{"type": "integer", "description": "Number of regular files under pb_public."},
+						"quotaBytes":    oa{"type": "integer", "format": "int64", "description": "Configured pb_public quota in bytes; 0 means unlimited."},
+						"overQuota":     oa{"type": "boolean", "description": "Whether pb_public usage exceeds a non-zero quota."},
 					},
 				},
 				"Invitation": oa{

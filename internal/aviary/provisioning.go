@@ -94,6 +94,13 @@ func (a *Aviary) SetProjectSPA(ctx context.Context, id string, spa bool) error {
 	return nil
 }
 
+// SetProjectQuota updates a project's pb_public storage quota in bytes (0 =
+// unlimited). The quota is enforced at write/deploy time, so no eviction or
+// reboot is needed. Returns ErrNotFound if the project does not exist.
+func (a *Aviary) SetProjectQuota(ctx context.Context, id string, bytes int64) error {
+	return a.store.SetQuota(ctx, id, bytes)
+}
+
 // DeleteProject stops the project's app (if running), removes its registry
 // entry and deletes its data directory. Returns ErrNotFound if it does not
 // exist.

@@ -163,6 +163,15 @@
   .danger-zone h2 { color: var(--danger); }
   .danger-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: space-between; }
   .danger-row p { margin: 0; font-size: 13px; color: var(--muted); }
+  /* ---------- Storage & quota ---------- */
+  .storage { font-size: 13px; }
+  .storage-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; max-width: 360px; }
+  .storage-grid dt { color: var(--muted); }
+  .storage-grid dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .storage-grid .storage-total { font-weight: 600; color: var(--fg); }
+  .storagebar { margin-top: 12px; height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; }
+  .storagebar-fill { height: 100%; background: var(--accent); transition: width .2s; }
+  .storagebar-fill.over { background: var(--danger); }
   /* ---------- API docs ---------- */
   .docs-tag { margin-top: 22px; }
   .docs-tag:first-child { margin-top: 6px; }
@@ -387,6 +396,19 @@
 
       <!-- Settings sub-view (superuser only) -->
       <div class="subview su-only" data-subview="fvSettings">
+        <div class="card" id="fvStorageCard">
+          <h2 style="margin-top:0">Storage &amp; quota</h2>
+          <div id="fvStorage" class="storage muted">Loading usage…</div>
+          <div class="storagebar hidden" id="fvQuotaBarWrap"><div class="storagebar-fill" id="fvQuotaBar"></div></div>
+          <div class="row" style="margin-top:14px; align-items:flex-end">
+            <div>
+              <label for="fvQuota">pb_public quota (MiB) <span class="muted">(0 = unlimited)</span></label>
+              <input id="fvQuota" type="number" min="0" step="1" placeholder="0" />
+            </div>
+            <div style="flex:0 0 auto"><button id="fvQuotaSave" class="secondary" type="button">Save quota</button></div>
+          </div>
+          <div class="err" id="fvQuotaErr"></div>
+        </div>
         <div class="card" id="fvOptionsCard">
           <h2 style="margin-top:0">Serving</h2>
           <label class="toggle">
@@ -1169,6 +1191,7 @@ function openFiles(p) {
   showView("files");
   loadFiles();
   loadKeys();
+  loadMetrics();
 }
 
 function fvClearEditor() {
@@ -1327,6 +1350,56 @@ $("fvDelProject").addEventListener("click", async () => {
   if (!res.ok) { $("fvDelProjectErr").textContent = (res.data && res.data.error) || "Failed to delete project."; return; }
   showView("projects");
   loadProjects();
+});
+
+const MiB = 1024 * 1024;
+function fmtBytes(n) {
+  if (n < 1024) return `${n} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let v = n / 1024, i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(1)} ${units[i]}`;
+}
+
+async function loadMetrics() {
+  const el = $("fvStorage");
+  $("fvQuotaErr").textContent = "";
+  const res = await api("GET", `/api/projects/${fvState.id}/metrics`);
+  if (!res.ok) { el.textContent = (res.data && res.data.error) || "Failed to load usage."; return; }
+  const m = res.data;
+  $("fvQuota").value = m.quotaBytes ? Math.round(m.quotaBytes / MiB) : 0;
+  el.innerHTML = "";
+  const grid = document.createElement("dl");
+  grid.className = "storage-grid";
+  const row = (label, value, cls) => {
+    const dt = document.createElement("dt"); dt.textContent = label;
+    const dd = document.createElement("dd"); dd.textContent = value; if (cls) dd.className = cls;
+    grid.append(dt, dd);
+  };
+  row("Static files", `${fmtBytes(m.publicBytes)} · ${m.publicFiles} file${m.publicFiles === 1 ? "" : "s"}`);
+  row("Database & internal", fmtBytes(m.databaseBytes));
+  row("Total", fmtBytes(m.storageBytes), "storage-total");
+  row("Quota (pb_public)", m.quotaBytes ? fmtBytes(m.quotaBytes) : "unlimited");
+  el.append(grid);
+
+  const wrap = $("fvQuotaBarWrap"), bar = $("fvQuotaBar");
+  if (m.quotaBytes > 0) {
+    const pct = Math.min(100, (m.publicBytes / m.quotaBytes) * 100);
+    bar.style.width = pct.toFixed(1) + "%";
+    bar.classList.toggle("over", m.overQuota);
+    wrap.classList.remove("hidden");
+  } else {
+    wrap.classList.add("hidden");
+  }
+}
+
+$("fvQuotaSave").addEventListener("click", async () => {
+  $("fvQuotaErr").textContent = "";
+  const mib = parseInt($("fvQuota").value, 10);
+  if (!Number.isInteger(mib) || mib < 0) { $("fvQuotaErr").textContent = "Quota must be 0 (unlimited) or a positive number of MiB."; return; }
+  const res = await api("PATCH", `/api/projects/${fvState.id}`, { quotaBytes: mib * MiB });
+  if (!res.ok) { $("fvQuotaErr").textContent = (res.data && res.data.error) || "Failed to update quota."; return; }
+  await loadMetrics();
 });
 
 refresh();

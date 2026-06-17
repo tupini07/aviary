@@ -50,6 +50,9 @@ func (a *Aviary) controlHandler() http.Handler {
 	// single swap. Same auth as the file endpoints (cookie or API key).
 	mux.HandleFunc("POST /api/projects/{id}/deploy", a.requireAuth(a.apiDeployProject))
 
+	// Per-project storage usage + quota metrics. Same auth as files.
+	mux.HandleFunc("GET /api/projects/{id}/metrics", a.requireAuth(a.apiProjectMetrics))
+
 	// Project-scoped API keys: non-interactive credentials for agents/CI to
 	// drive the file (and future deploy) endpoints. Management is owner-only
 	// (superuser or granted collaborator); API keys themselves cannot manage
@@ -109,9 +112,10 @@ type createProjectRequest struct {
 }
 
 type patchProjectRequest struct {
-	Status *Status `json:"status,omitempty"`
-	Name   *string `json:"name,omitempty"`
-	SPA    *bool   `json:"spa,omitempty"`
+	Status     *Status `json:"status,omitempty"`
+	Name       *string `json:"name,omitempty"`
+	SPA        *bool   `json:"spa,omitempty"`
+	QuotaBytes *int64  `json:"quotaBytes,omitempty"`
 }
 
 // projectView augments a stored Project with live runtime state for API
@@ -204,8 +208,8 @@ func (a *Aviary) apiPatchProject(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req, a) {
 		return
 	}
-	if req.Status == nil && req.Name == nil && req.SPA == nil {
-		a.apiError(w, http.StatusBadRequest, "nothing to update: provide 'status', 'name' and/or 'spa'")
+	if req.Status == nil && req.Name == nil && req.SPA == nil && req.QuotaBytes == nil {
+		a.apiError(w, http.StatusBadRequest, "nothing to update: provide 'status', 'name', 'spa' and/or 'quotaBytes'")
 		return
 	}
 
@@ -219,6 +223,16 @@ func (a *Aviary) apiPatchProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.SPA != nil {
 		if err := a.SetProjectSPA(r.Context(), id, *req.SPA); err != nil {
+			a.patchError(w, err)
+			return
+		}
+	}
+	if req.QuotaBytes != nil {
+		if *req.QuotaBytes < 0 {
+			a.apiError(w, http.StatusBadRequest, "quotaBytes must be zero (unlimited) or a positive number of bytes")
+			return
+		}
+		if err := a.SetProjectQuota(r.Context(), id, *req.QuotaBytes); err != nil {
 			a.patchError(w, err)
 			return
 		}

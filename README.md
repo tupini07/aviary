@@ -365,6 +365,36 @@ in CI and pushes the artifact to Aviary on every push to `main` — the typical
 pattern: build in CI, deploy the static output, with the project's own cage as
 the PocketBase backend.
 
+### Storage quotas & metrics
+
+Each project exposes a usage snapshot at `GET /api/projects/{id}/metrics`
+(same auth as the file endpoints — session cookie or project API key):
+
+```json
+{
+  "running": false,
+  "lastActive": null,
+  "storageBytes": 81920,
+  "publicBytes": 14336,
+  "databaseBytes": 67584,
+  "publicFiles": 7,
+  "quotaBytes": 1048576,
+  "overQuota": false
+}
+```
+
+`storageBytes` is the whole data directory; `publicBytes`/`publicFiles` cover the
+`pb_public` static files; `databaseBytes` is the rest (PocketBase databases, logs,
+hooks). `running`/`lastActive` reflect whether the cage is currently booted.
+
+You can cap a project's `pb_public` storage with a **quota** (superuser only),
+either from the project **Settings** tab or via
+`PATCH /api/projects/{id}` with `{"quotaBytes": 1048576}` (`0` = unlimited). The
+quota is enforced at write time: a file write or a `deploy` that would push
+`pb_public` past the limit is rejected with `507 Insufficient Storage`, and a
+rejected deploy never touches the live site (the limit is checked against the
+fully-staged tree before the atomic swap).
+
 ### Passkeys (WebAuthn)
 
 Project users (records in each project's `users` collection) sign in with
@@ -422,6 +452,7 @@ control-plane SSO handoff to sign in.
 | `internal/aviary/dashboard_sso.go`  | One-click dashboard SSO (ticket → minted token) |
 | `internal/aviary/files.go`          | Per-project pb_public file editor API (list/read/write/delete) |
 | `internal/aviary/deploy.go`         | Atomic archive deploy (.tar.gz/.zip → pb_public swap) |
+| `internal/aviary/metrics.go`        | Per-project storage metrics + pb_public quota enforcement |
 | `internal/aviary/apikeys.go`        | Project-scoped API keys (mint/list/revoke) + bearer auth |
 | `internal/aviary/openapi.go` + `openapi_control.go` + `openapi_project.go` | OpenAPI 3.1 specs (control plane + on-the-fly per project) |
 | `internal/aviary/collaborators.go` + `collaborator_api.go` | Invitations + project-scoped collaborators |
@@ -450,4 +481,4 @@ control-plane SSO handoff to sign in.
 - [x] Project-scoped API keys for agents/CI (bearer auth on the file/deploy endpoints)
 - [x] Atomic archive deploy endpoint + GitHub Action (build in CI, push artifact)
 - [x] Self-update command (`aviary update` — download + verify the matching GitHub release, atomic binary swap)
-- [ ] Per-project quotas and metrics
+- [x] Per-project storage quotas and metrics (pb_public usage + quota enforcement on write/deploy)

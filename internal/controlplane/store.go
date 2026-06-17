@@ -51,12 +51,13 @@ func ValidID(id string) bool {
 
 // Project is a control-plane project record.
 type Project struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Status    Status    `json:"status"`
-	SPA       bool      `json:"spa"`
-	CreatedAt time.Time `json:"created"`
-	UpdatedAt time.Time `json:"updated"`
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	Status     Status    `json:"status"`
+	SPA        bool      `json:"spa"`
+	QuotaBytes int64     `json:"quotaBytes"`
+	CreatedAt  time.Time `json:"created"`
+	UpdatedAt  time.Time `json:"updated"`
 }
 
 // Store persists project records in a dedicated SQLite database.
@@ -96,12 +97,13 @@ func (s *Store) Close() error {
 func (s *Store) migrate(ctx context.Context) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS projects (
-	id         TEXT PRIMARY KEY,
-	name       TEXT NOT NULL DEFAULT '',
-	status     TEXT NOT NULL DEFAULT 'active',
-	spa        INTEGER NOT NULL DEFAULT 0,
-	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL
+	id          TEXT PRIMARY KEY,
+	name        TEXT NOT NULL DEFAULT '',
+	status      TEXT NOT NULL DEFAULT 'active',
+	spa         INTEGER NOT NULL DEFAULT 0,
+	quota_bytes INTEGER NOT NULL DEFAULT 0,
+	created_at  TEXT NOT NULL,
+	updated_at  TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS superuser (
@@ -166,6 +168,11 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_project ON api_keys (project_id);`
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("controlplane: migrate spa column: %w", err)
 	}
+	if _, err := s.db.ExecContext(ctx,
+		`ALTER TABLE projects ADD COLUMN quota_bytes INTEGER NOT NULL DEFAULT 0`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("controlplane: migrate quota_bytes column: %w", err)
+	}
 	return nil
 }
 
@@ -186,8 +193,8 @@ func (s *Store) Create(ctx context.Context, id, name string) (*Project, error) {
 	}
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO projects (id, name, status, spa, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, string(p.Status), boolToInt(p.SPA), formatTime(p.CreatedAt), formatTime(p.UpdatedAt),
+		`INSERT INTO projects (id, name, status, spa, quota_bytes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, string(p.Status), boolToInt(p.SPA), p.QuotaBytes, formatTime(p.CreatedAt), formatTime(p.UpdatedAt),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -201,7 +208,7 @@ func (s *Store) Create(ctx context.Context, id, name string) (*Project, error) {
 // Get returns the project with the given id, or ErrNotFound.
 func (s *Store) Get(ctx context.Context, id string) (*Project, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, status, spa, created_at, updated_at FROM projects WHERE id = ?`, id)
+		`SELECT id, name, status, spa, quota_bytes, created_at, updated_at FROM projects WHERE id = ?`, id)
 	p, err := scanProject(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -215,7 +222,7 @@ func (s *Store) Get(ctx context.Context, id string) (*Project, error) {
 // List returns all projects ordered by id.
 func (s *Store) List(ctx context.Context) ([]*Project, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, status, spa, created_at, updated_at FROM projects ORDER BY id`)
+		`SELECT id, name, status, spa, quota_bytes, created_at, updated_at FROM projects ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: list: %w", err)
 	}
@@ -269,6 +276,22 @@ func (s *Store) SetSPA(ctx context.Context, id string, spa bool) error {
 		boolToInt(spa), formatTime(s.now().UTC()), id)
 	if err != nil {
 		return fmt.Errorf("controlplane: set spa %q: %w", id, err)
+	}
+	return requireAffected(res)
+}
+
+// SetQuota updates a project's storage quota in bytes for its pb_public static
+// files. A value of 0 means unlimited. Returns ErrNotFound if the project does
+// not exist.
+func (s *Store) SetQuota(ctx context.Context, id string, bytes int64) error {
+	if bytes < 0 {
+		bytes = 0
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE projects SET quota_bytes = ?, updated_at = ? WHERE id = ?`,
+		bytes, formatTime(s.now().UTC()), id)
+	if err != nil {
+		return fmt.Errorf("controlplane: set quota %q: %w", id, err)
 	}
 	return requireAffected(res)
 }
@@ -415,7 +438,7 @@ func scanProject(sc scanner) (*Project, error) {
 		spa                    int
 		createdRaw, updatedRaw string
 	)
-	if err := sc.Scan(&p.ID, &p.Name, &status, &spa, &createdRaw, &updatedRaw); err != nil {
+	if err := sc.Scan(&p.ID, &p.Name, &status, &spa, &p.QuotaBytes, &createdRaw, &updatedRaw); err != nil {
 		return nil, err
 	}
 	p.Status = Status(status)

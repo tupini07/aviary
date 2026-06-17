@@ -223,6 +223,10 @@ func (a *Aviary) apiWriteFile(w http.ResponseWriter, r *http.Request) {
 		a.apiError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if msg, ok := a.checkWriteQuota(r, id, full, int64(len(req.Content))); !ok {
+		a.apiError(w, http.StatusInsufficientStorage, msg)
+		return
+	}
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		a.apiError(w, http.StatusBadRequest, "cannot create parent directory: "+err.Error())
 		return
