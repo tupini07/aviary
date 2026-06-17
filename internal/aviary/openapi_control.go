@@ -187,6 +187,16 @@ func controlOpenAPI(serverURL string) oa {
 				"responses":  oa{"204": oa{"description": "Deleted"}, "400": errResp("Invalid path"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("File not found")},
 			},
 		},
+		"/api/projects/{id}/deploy": oa{
+			"post": oa{
+				"tags": []any{"files"}, "summary": "Deploy a built site archive into pb_public",
+				"description": "Upload a .tar.gz (gzip) or .zip of a built site; Aviary extracts it and publishes the result into the project's pb_public directory in a single atomic swap (never half-deployed). By default the archive is overlaid on existing files; pass ?clean=true to replace the directory wholesale. The body is the raw archive bytes. Accepts a session cookie or a project-scoped API key — the intended target for CI.",
+				"security":    cookieOrKey,
+				"parameters":  []any{idParam, oa{"name": "clean", "in": "query", "required": false, "description": "Replace pb_public entirely instead of overlaying.", "schema": oa{"type": "boolean", "default": false}}},
+				"requestBody": oa{"required": true, "content": oa{"application/gzip": oa{"schema": oa{"type": "string", "format": "binary"}}, "application/zip": oa{"schema": oa{"type": "string", "format": "binary"}}, "application/octet-stream": oa{"schema": oa{"type": "string", "format": "binary"}}}},
+				"responses":   oa{"200": oa{"description": "Deploy published", "content": jsonBody(ref("DeployResult"))["content"]}, "400": errResp("Invalid or unsupported archive"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found"), "413": errResp("Archive exceeds the upload limit")},
+			},
+		},
 		"/api/projects/{id}/keys": oa{
 			"get": oa{
 				"tags": []any{"keys"}, "summary": "List a project's API keys",
@@ -406,6 +416,14 @@ func controlOpenAPI(serverURL string) oa {
 					"allOf": []any{
 						ref("APIKey"),
 						oa{"type": "object", "required": []any{"token"}, "properties": oa{"token": oa{"type": "string", "description": "The secret token, shown exactly once. Send it as 'Authorization: Bearer <token>'."}}},
+					},
+				},
+				"DeployResult": oa{
+					"type": "object",
+					"properties": oa{
+						"mode":  oa{"type": "string", "enum": []any{"overlay", "replace"}, "description": "Whether the archive was overlaid on existing files or replaced them."},
+						"files": oa{"type": "integer", "description": "Number of files extracted and published."},
+						"bytes": oa{"type": "integer", "format": "int64", "description": "Total uncompressed bytes written."},
 					},
 				},
 				"Invitation": oa{

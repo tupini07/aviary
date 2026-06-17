@@ -1,0 +1,51 @@
+# Example GitHub Actions workflow: build a static web app and deploy it to an
+# Aviary project on every push to main.
+#
+# Concretely models the little-green-notebook flow: build the UI in CI, then
+# push the artifact to Aviary (whose cage is the project's own PocketBase
+# backend — one instance, one config, no in-process building on the host).
+#
+# Setup:
+#   1. In the Aviary control plane, open the project's Files view and create an
+#      API key (or POST /api/projects/{id}/keys). Copy the av_... token once.
+#   2. In the GitHub repo: Settings → Secrets and variables → Actions, add a
+#      secret named AVIARY_KEY with that token.
+#   3. Adjust AVIARY_URL and AVIARY_PROJECT below, plus the build steps.
+#
+# Copy this file to .github/workflows/deploy.yml in your app's repository.
+
+name: Deploy to Aviary
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install & build
+        run: |
+          npm ci
+          npm run build   # must emit static files into ./dist
+
+      - name: Deploy to Aviary
+        env:
+          AVIARY_URL: https://console.example.com
+          AVIARY_PROJECT: little-green-notebook
+          AVIARY_KEY: ${{ secrets.AVIARY_KEY }}
+        run: |
+          # Tar the *contents* of dist (-C dist .) so paths land at pb_public root,
+          # then atomically deploy. Add ?clean=true to fully replace pb_public.
+          tar -C dist -czf - . | curl --fail --show-error --silent \
+            -X POST \
+            -H "Authorization: Bearer $AVIARY_KEY" \
+            -H "Content-Type: application/gzip" \
+            --data-binary @- \
+            "$AVIARY_URL/api/projects/$AVIARY_PROJECT/deploy"

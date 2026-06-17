@@ -182,6 +182,7 @@ curl -s -b cj -i http://127.0.0.1:8090/api/projects/alpha/dashboard
 | `GET /api/projects/{id}/files/content?path=…` | any¹ | Read a pb_public file            |
 | `PUT /api/projects/{id}/files/content` | any¹       | Create/overwrite a pb_public file |
 | `DELETE /api/projects/{id}/files/content?path=…` | any¹ | Delete a pb_public file       |
+| `POST /api/projects/{id}/deploy`  | any¹            | Atomically deploy a `.tar.gz`/`.zip` into pb_public |
 | `GET /api/projects/{id}/keys`     | owner³          | List a project's API keys        |
 | `POST /api/projects/{id}/keys`    | owner³          | Mint a project-scoped API key (token shown once) |
 | `DELETE /api/projects/{id}/keys/{keyId}` | owner³   | Revoke an API key                |
@@ -198,7 +199,8 @@ curl -s -b cj -i http://127.0.0.1:8090/api/projects/alpha/dashboard
 per-project `files` endpoints are available to collaborators too, but only for
 the projects they have been granted; instance-wide mutations are superuser-only.
 The `files` endpoints additionally accept a **project-scoped API key** (see
-[API keys](#api-keys-for-agents--ci)).
+[API keys](#api-keys-for-agents--ci)). So does `POST /api/projects/{id}/deploy`
+(see [Deploying a built site](#deploying-a-built-site)).
 
 ² `PUT /api/superuser` is allowed unauthenticated **only** for first-run setup
 (while no superuser exists); afterwards it requires a session.
@@ -281,9 +283,9 @@ curl -s http://alpha.localhost:8090/
 
 Editing files through the UI is convenient for humans, but agents and CI want a
 non-interactive credential. Each project can mint **project-scoped API keys**: a
-key authorizes exactly one project's `files` endpoints (and future deploy
-endpoints) and nothing else — never instance-wide operations, and never key
-management itself, so a leaked deploy key cannot escalate by minting more keys.
+key authorizes exactly one project's `files` and `deploy` endpoints and nothing
+else — never instance-wide operations, and never key management itself, so a
+leaked deploy key cannot escalate by minting more keys.
 
 Create and revoke keys from the **Files** view (the *API keys* card), or via the
 API. The raw token is shown **once**, at creation; only its SHA-256 hash is
@@ -305,6 +307,39 @@ curl -s -X PUT http://127.0.0.1:8090/api/projects/alpha/files/content \
 
 Keys may carry an optional expiry (`expiresInDays`); omit it for a non-expiring
 key. Revoking a key (or deleting its project) invalidates it immediately.
+
+### Deploying a built site
+
+Writing files one-by-one is fine for small edits, but a real web app is a whole
+build output (`dist/`). `POST /api/projects/{id}/deploy` takes an entire site as
+a single `.tar.gz` or `.zip` (format auto-detected) and swaps it into `pb_public`
+**atomically**: the archive is extracted into a staging directory alongside
+`pb_public`, then renamed into place, so a request never sees a half-written
+site, and a failed/corrupt upload leaves the live site untouched. The static
+route reads live from disk, so the new site is served immediately — no reboot.
+
+- **Overlay (default):** the archive is layered over the current `pb_public`,
+  so files you don't include are kept.
+- **Clean replace:** add `?clean=true` to replace `pb_public` wholesale.
+
+Authenticate with an owner session **or** a project API key. Safety caps apply:
+50 MiB compressed upload, 250 MiB uncompressed, 5000 files; path traversal
+(`../`, absolute paths) is rejected.
+
+```bash
+# tar the *contents* of dist (-C dist .) so paths land at the pb_public root
+tar -C dist -czf - . | curl -s -X POST \
+  -H 'Authorization: Bearer av_…' \
+  -H 'Content-Type: application/gzip' \
+  --data-binary @- \
+  http://127.0.0.1:8090/api/projects/alpha/deploy
+```
+
+The [`examples/`](examples/) directory has a portable `deploy.sh` and a ready-to-copy
+[GitHub Actions workflow](examples/github-actions-deploy.yml) that builds a web app
+in CI and pushes the artifact to Aviary on every push to `main` — the
+little-green-notebook pattern: build in CI, deploy the static output, with the
+project's own cage as the PocketBase backend.
 
 ### Passkeys (WebAuthn)
 
@@ -361,6 +396,7 @@ control-plane SSO handoff to sign in.
 | `internal/aviary/superuser_passkey.go` | Superuser WebAuthn ceremonies (control plane) |
 | `internal/aviary/dashboard_sso.go`  | One-click dashboard SSO (ticket → minted token) |
 | `internal/aviary/files.go`          | Per-project pb_public file editor API (list/read/write/delete) |
+| `internal/aviary/deploy.go`         | Atomic archive deploy (.tar.gz/.zip → pb_public swap) |
 | `internal/aviary/apikeys.go`        | Project-scoped API keys (mint/list/revoke) + bearer auth |
 | `internal/aviary/openapi.go` + `openapi_control.go` + `openapi_project.go` | OpenAPI 3.1 specs (control plane + on-the-fly per project) |
 | `internal/aviary/collaborators.go` + `collaborator_api.go` | Invitations + project-scoped collaborators |
@@ -387,5 +423,5 @@ control-plane SSO handoff to sign in.
 - [x] Auto-generated OpenAPI 3.1 specs (control plane + on-the-fly per project)
 - [x] Static file hosting per project (`pb_public`) + in-browser file editor + SPA fallback toggle
 - [x] Project-scoped API keys for agents/CI (bearer auth on the file/deploy endpoints)
-- [ ] Atomic archive deploy endpoint + GitHub Action (build in CI, push artifact)
+- [x] Atomic archive deploy endpoint + GitHub Action (build in CI, push artifact)
 - [ ] Per-project quotas and metrics

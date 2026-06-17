@@ -45,6 +45,7 @@ func TestControlOpenAPI(t *testing.T) {
 		"/api/openapi.json", "/api/auth/login", "/api/projects",
 		"/api/projects/{id}", "/api/projects/{id}/dashboard", "/api/invitations",
 		"/api/projects/{id}/keys", "/api/projects/{id}/keys/{keyId}",
+		"/api/projects/{id}/deploy",
 	} {
 		if _, ok := p[want]; !ok {
 			t.Errorf("control spec missing path %q", want)
@@ -63,7 +64,7 @@ func TestControlOpenAPI(t *testing.T) {
 	if _, ok := schemas["Project"]; !ok {
 		t.Errorf("control spec missing Project schema")
 	}
-	for _, want := range []string{"APIKey", "CreateAPIKey", "CreatedAPIKey"} {
+	for _, want := range []string{"APIKey", "CreateAPIKey", "CreatedAPIKey", "DeployResult"} {
 		if _, ok := schemas[want]; !ok {
 			t.Errorf("control spec missing %s schema", want)
 		}

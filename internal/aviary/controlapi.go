@@ -46,6 +46,10 @@ func (a *Aviary) controlHandler() http.Handler {
 	mux.HandleFunc("PUT /api/projects/{id}/files/content", a.requireAuth(a.apiWriteFile))
 	mux.HandleFunc("DELETE /api/projects/{id}/files/content", a.requireAuth(a.apiDeleteFile))
 
+	// Bulk atomic deploy: publish a built site (tar.gz/zip) into pb_public in a
+	// single swap. Same auth as the file endpoints (cookie or API key).
+	mux.HandleFunc("POST /api/projects/{id}/deploy", a.requireAuth(a.apiDeployProject))
+
 	// Project-scoped API keys: non-interactive credentials for agents/CI to
 	// drive the file (and future deploy) endpoints. Management is owner-only
 	// (superuser or granted collaborator); API keys themselves cannot manage
