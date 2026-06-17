@@ -5,198 +5,316 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Aviary — Control Plane</title>
 <style>
+  /* Palette mirrors the PocketBase dashboard: light surfaces, dark sidebar,
+     blue accent, tight 5px radii. Legacy --var names are kept (remapped to the
+     new palette) so existing inline references stay valid. */
   :root {
-    --bg: #0f1115; --panel: #181b22; --panel2: #1f232c; --border: #2a2f3a;
-    --fg: #e6e9ef; --muted: #9aa3b2; --accent: #5b8cff; --danger: #ff5b6e;
-    --ok: #34d399; --warn: #fbbf24;
+    --bg: #f7f8fa; --panel: #ffffff; --panel2: #f1f3f5; --border: #e1e6ea;
+    --fg: #25272d; --muted: #687278; --accent: #3376e5; --accent-press: #2c63c9;
+    --danger: #c33751; --ok: #22a96d; --warn: #e57534;
+    --sidebar: #25272d; --sidebar-fg: #e9eaec; --sidebar-muted: #9aa0a6;
+    --sidebar-active: #34373f;
+    --radius: 6px; --radius-sm: 5px;
+    --shadow: 0 4px 16px -8px rgba(34, 36, 36, .28);
+    --shadow-sm: 0 2px 6px -3px rgba(34, 36, 36, .25);
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--bg); color: var(--fg);
+    margin: 0; font: 14px/1.55 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--fg); -webkit-font-smoothing: antialiased;
   }
-  header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--panel);
-  }
-  header h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
-  header .who { color: var(--muted); font-size: 13px; }
-  main { max-width: 880px; margin: 0 auto; padding: 24px; }
+  code { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .85em; background: var(--panel2); border: 1px solid var(--border);
+    padding: 1px 6px; border-radius: 4px; }
+
+  /* ---------- Auth screens (gate / invite) ---------- */
+  .auth-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px; background:
+      radial-gradient(1200px 600px at 50% -10%, #eef2f7 0%, var(--bg) 60%); }
+  .auth-card { width: 100%; max-width: 380px; }
+  .auth-brand { display: flex; align-items: center; justify-content: center; gap: 9px;
+    font-size: 20px; font-weight: 600; margin-bottom: 20px; letter-spacing: .2px; }
+  .auth-brand .logo { font-size: 26px; }
+
+  /* ---------- App shell: sidebar + content ---------- */
+  .shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 232px; flex: 0 0 232px; background: var(--sidebar); color: var(--sidebar-fg);
+    display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 20px 20px 16px;
+    font-size: 17px; font-weight: 600; letter-spacing: .2px; }
+  .brand .logo { font-size: 22px; }
+  .brand small { color: var(--sidebar-muted); font-weight: 400; font-size: 11px;
+    text-transform: uppercase; letter-spacing: .8px; display: block; margin-top: 1px; }
+  .nav { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    background: transparent; color: var(--sidebar-muted); border: 0; border-radius: var(--radius-sm);
+    padding: 9px 12px; font-size: 14px; font-weight: 500; cursor: pointer; }
+  .nav-item .ico { width: 18px; text-align: center; font-size: 15px; opacity: .9; }
+  .nav-item:hover { background: var(--sidebar-active); color: var(--sidebar-fg); }
+  .nav-item.current { background: var(--accent); color: #fff; }
+  .nav-item.current:hover { background: var(--accent); }
+  .sidebar-foot { margin-top: auto; padding: 14px 16px; border-top: 1px solid #34373f; }
+  .who { color: var(--sidebar-muted); font-size: 13px; display: flex; flex-direction: column;
+    align-items: flex-start; gap: 8px; }
+  .who .id { color: var(--sidebar-fg); font-weight: 500; word-break: break-all; }
+  .content { flex: 1; min-width: 0; max-width: 920px; padding: 28px 32px; }
+
+  .view { display: none; }
+  .view.active { display: block; }
+  .view-head { margin: 0 0 18px; }
+  .view-head h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: .2px; }
+  .view-head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+
+  /* ---------- Cards ---------- */
   .card {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-    padding: 20px; margin-bottom: 20px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px; margin-bottom: 18px; box-shadow: var(--shadow-sm);
   }
-  .card h2 { margin: 0 0 14px; font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
-  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
-  input {
-    width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border);
-    background: var(--panel2); color: var(--fg); font-size: 14px;
+  .card h2 { margin: 0 0 14px; font-size: 12px; color: var(--muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: .7px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; font-weight: 500; }
+  input, select {
+    width: 100%; padding: 9px 11px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+    background: var(--panel); color: var(--fg); font-size: 14px; font-family: inherit;
+    transition: border-color .12s, box-shadow .12s;
   }
-  select {
-    width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border);
-    background: var(--panel2); color: var(--fg); font-size: 14px;
-  }
-  input:focus, select:focus { outline: none; border-color: var(--accent); }
-  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  input:focus, select:focus { outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(51, 118, 229, .14); }
+  input[readonly] { background: var(--panel2); }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
   .row > div { flex: 1; min-width: 160px; }
+
+  /* ---------- Buttons ---------- */
   button {
-    cursor: pointer; border: 0; border-radius: 8px; padding: 9px 16px;
-    font-size: 14px; font-weight: 600; color: #fff; background: var(--accent);
+    cursor: pointer; border: 1px solid transparent; border-radius: var(--radius-sm);
+    padding: 9px 16px; font-size: 14px; font-weight: 500; font-family: inherit;
+    color: #fff; background: var(--accent); transition: background .12s, border-color .12s, opacity .12s;
   }
-  button.secondary { background: var(--panel2); border: 1px solid var(--border); color: var(--fg); }
+  button:hover { background: var(--accent-press); }
+  button.secondary { background: var(--panel2); border-color: var(--border); color: var(--fg); }
+  button.secondary:hover { background: #e7ebef; }
   button.danger { background: var(--danger); }
-  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  button.danger:hover { background: #ad2f46; }
+  button.ghost { background: transparent; color: var(--muted); border-color: var(--border); }
+  button.ghost:hover { background: var(--panel2); color: var(--fg); }
   button:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* ---------- Tables ---------- */
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 14px; }
-  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
-  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-  .pill.active { background: rgba(52,211,153,.15); color: var(--ok); }
-  .pill.disabled { background: rgba(251,191,36,.15); color: var(--warn); }
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  .actions button, .actions a { padding: 5px 10px; font-size: 13px; }
-  a.btnlink { text-decoration: none; display: inline-block; border-radius: 8px; font-weight: 600;
-    background: var(--panel2); border: 1px solid var(--border); color: var(--fg); }
+  th, td { text-align: left; padding: 11px 10px; border-bottom: 1px solid var(--border); font-size: 14px; }
+  thead th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .5px; border-bottom: 1px solid var(--border); }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: var(--panel2); }
+
+  /* ---------- Pills / badges ---------- */
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px;
+    border-radius: 999px; font-size: 12px; font-weight: 500; line-height: 1.5; }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .pill.active { background: color-mix(in srgb, var(--ok), white 84%); color: #198754; }
+  .pill.disabled { background: color-mix(in srgb, var(--warn), white 82%); color: #b85e22; }
+
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .actions button, .actions a { padding: 6px 11px; font-size: 13px; }
+  a.btnlink { text-decoration: none; display: inline-block; border-radius: var(--radius-sm);
+    font-weight: 500; background: var(--panel2); border: 1px solid var(--border); color: var(--fg);
+    padding: 6px 11px; transition: background .12s; }
+  a.btnlink:hover { background: #e7ebef; }
+
   .muted { color: var(--muted); }
   .err { color: var(--danger); font-size: 13px; min-height: 18px; margin-top: 8px; }
   .hidden { display: none !important; }
   .center { max-width: 380px; margin: 8vh auto; }
   .stack > * + * { margin-top: 12px; }
-  .empty { color: var(--muted); text-align: center; padding: 24px; }
+  .empty { color: var(--muted); text-align: center; padding: 28px; font-size: 14px; }
+
+  @media (max-width: 720px) {
+    .shell { flex-direction: column; }
+    .sidebar { width: 100%; flex: none; height: auto; position: static; flex-direction: row;
+      flex-wrap: wrap; align-items: center; }
+    .brand { padding: 14px 16px; }
+    .nav { flex-direction: row; flex: 1; padding: 8px; overflow-x: auto; }
+    .nav-item { width: auto; white-space: nowrap; }
+    .sidebar-foot { margin: 0; border-top: 0; border-left: 1px solid #34373f; }
+    .content { padding: 20px 16px; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>🪺 Aviary <span class="muted" style="font-weight:400">control plane</span></h1>
-  <div class="who hidden" id="whoami"></div>
-</header>
 
 <!-- Invitation accept view -->
-<main id="invite" class="hidden">
-  <div class="card center stack">
-    <h2>Accept your invitation</h2>
-    <p class="muted" id="invHint" style="font-size:13px; margin-top:0">
-      Set a password to join the project. If you already have a collaborator account, just confirm.
-    </p>
-    <div>
-      <label for="invPassword">Password</label>
-      <input id="invPassword" type="password" autocomplete="new-password" placeholder="at least 8 characters" />
+<main id="invite" class="auth-screen hidden">
+  <div class="auth-card stack">
+    <div class="auth-brand"><span class="logo">🪺</span> Aviary</div>
+    <div class="card stack">
+      <h2>Accept your invitation</h2>
+      <p class="muted" id="invHint" style="font-size:13px; margin-top:0">
+        Set a password to join the project. If you already have a collaborator account, just confirm.
+      </p>
+      <div>
+        <label for="invPassword">Password</label>
+        <input id="invPassword" type="password" autocomplete="new-password" placeholder="at least 8 characters" />
+      </div>
+      <button id="invSubmit" style="width:100%">Accept invitation</button>
+      <div class="err" id="invErr"></div>
+      <p class="muted" id="invDone" style="font-size:13px"></p>
     </div>
-    <button id="invSubmit">Accept invitation</button>
-    <div class="err" id="invErr"></div>
-    <p class="muted" id="invDone" style="font-size:13px"></p>
   </div>
 </main>
 
 <!-- Setup / login gate -->
-<main id="gate" class="hidden">
-  <div class="card center stack">
-    <h2 id="gateTitle">Sign in</h2>
-    <div>
-      <label for="gEmail">Email</label>
-      <input id="gEmail" type="email" autocomplete="username" />
+<main id="gate" class="auth-screen hidden">
+  <div class="auth-card stack">
+    <div class="auth-brand"><span class="logo">🪺</span> Aviary</div>
+    <div class="card stack">
+      <h2 id="gateTitle">Sign in</h2>
+      <div>
+        <label for="gEmail">Email</label>
+        <input id="gEmail" type="email" autocomplete="username" />
+      </div>
+      <div>
+        <label for="gPassword">Password</label>
+        <input id="gPassword" type="password" autocomplete="current-password" />
+      </div>
+      <button id="gSubmit" style="width:100%">Sign in</button>
+      <button id="gPasskey" class="secondary hidden" style="width:100%">🔑 Sign in with a passkey</button>
+      <div class="err" id="gErr"></div>
+      <p class="muted" id="gHint" style="font-size:13px"></p>
     </div>
-    <div>
-      <label for="gPassword">Password</label>
-      <input id="gPassword" type="password" autocomplete="current-password" />
-    </div>
-    <button id="gSubmit">Sign in</button>
-    <button id="gPasskey" class="secondary hidden" style="width:100%">🔑 Sign in with a passkey</button>
-    <div class="err" id="gErr"></div>
-    <p class="muted" id="gHint" style="font-size:13px"></p>
   </div>
 </main>
 
 <!-- Authenticated app -->
-<main id="app" class="hidden">
-  <div class="card">
-    <h2>Projects</h2>
-    <div id="projWrap">
-      <table id="projTable" class="hidden">
-        <thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Runtime</th><th></th></tr></thead>
-        <tbody id="projBody"></tbody>
-      </table>
-      <div class="empty hidden" id="projEmpty">No projects yet. Create one below.</div>
+<div id="app" class="shell hidden">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="logo">🪺</span>
+      <span>Aviary<small>control plane</small></span>
     </div>
-  </div>
+    <nav class="nav">
+      <button type="button" class="nav-item current" data-view="projects"><span class="ico">▦</span> Projects</button>
+      <button type="button" class="nav-item su-only" data-view="team"><span class="ico">＋</span> Team</button>
+      <button type="button" class="nav-item su-only" data-view="settings"><span class="ico">⚙</span> Settings</button>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="who hidden" id="whoami"></div>
+    </div>
+  </aside>
 
-  <div class="card su-only">
-    <h2>New project</h2>
-    <div class="row">
-      <div><label for="npId">ID (subdomain)</label><input id="npId" placeholder="my-app" /></div>
-      <div><label for="npName">Name (optional)</label><input id="npName" placeholder="My App" /></div>
-      <div style="flex:0 0 auto; display:flex; align-items:flex-end"><button id="npCreate">Create</button></div>
-    </div>
-    <div class="err" id="npErr"></div>
-  </div>
-
-  <div class="card su-only">
-    <h2>Superuser</h2>
-    <p class="muted" style="font-size:13px; margin-top:0">
-      These credentials are propagated to every project, so the same login unlocks every project dashboard.
-    </p>
-    <div class="row">
-      <div><label for="suEmail">Email</label><input id="suEmail" type="email" /></div>
-      <div><label for="suPassword">New password</label><input id="suPassword" type="password" placeholder="leave blank to keep email only" /></div>
-      <div style="flex:0 0 auto; display:flex; align-items:flex-end"><button id="suSave" class="secondary">Update</button></div>
-    </div>
-    <div class="err" id="suErr"></div>
-  </div>
-
-  <div class="card su-only">
-    <h2>Passkeys</h2>
-    <p class="muted" style="font-size:13px; margin-top:0">
-      Register a passkey to sign in to the control plane without a password.
-    </p>
-    <div id="pkWrap">
-      <table id="pkTable" class="hidden">
-        <thead><tr><th>Label</th><th>Added</th><th></th></tr></thead>
-        <tbody id="pkBody"></tbody>
-      </table>
-      <div class="empty hidden" id="pkEmpty">No passkeys registered yet.</div>
-    </div>
-    <div class="row" style="margin-top:14px">
-      <div><label for="pkLabel">Label (optional)</label><input id="pkLabel" placeholder="My Laptop" /></div>
-      <div style="flex:0 0 auto; display:flex; align-items:flex-end"><button id="pkAdd" class="secondary">Register a passkey</button></div>
-    </div>
-    <div class="err" id="pkErr"></div>
-  </div>
-
-  <div class="card su-only">
-    <h2>Collaborators &amp; invitations</h2>
-    <p class="muted" style="font-size:13px; margin-top:0">
-      Invite collaborators to administer a specific project. Accepting an invite
-      grants them dashboard access to that project only — not the whole instance.
-    </p>
-    <div class="row">
-      <div><label for="invEmail">Invitee email</label><input id="invEmail" type="email" placeholder="dev@example.com" /></div>
-      <div>
-        <label for="invProject">Project</label>
-        <select id="invProject"></select>
+  <div class="content">
+    <!-- Projects view -->
+    <section class="view active" data-view="projects">
+      <div class="view-head">
+        <h1>Projects</h1>
+        <p>Each project is an isolated PocketBase instance reachable on its own subdomain.</p>
       </div>
-      <div style="flex:0 0 auto; display:flex; align-items:flex-end"><button id="invCreate" class="secondary">Invite</button></div>
-    </div>
-    <div class="err" id="invCreateErr"></div>
-    <div id="invLink" class="hidden" style="margin-top:6px">
-      <label>Share this link with the invitee</label>
-      <input id="invLinkInput" readonly />
-    </div>
+      <div class="card">
+        <h2>All projects</h2>
+        <div id="projWrap">
+          <table id="projTable" class="hidden">
+            <thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Runtime</th><th></th></tr></thead>
+            <tbody id="projBody"></tbody>
+          </table>
+          <div class="empty hidden" id="projEmpty">No projects yet. Create one below.</div>
+        </div>
+      </div>
 
-    <h2 style="margin-top:22px">Pending invitations</h2>
-    <table id="pendTable" class="hidden">
-      <thead><tr><th>Email</th><th>Project</th><th>Expires</th></tr></thead>
-      <tbody id="pendBody"></tbody>
-    </table>
-    <div class="empty hidden" id="pendEmpty">No pending invitations.</div>
+      <div class="card su-only">
+        <h2>New project</h2>
+        <div class="row">
+          <div><label for="npId">ID (subdomain)</label><input id="npId" placeholder="my-app" /></div>
+          <div><label for="npName">Name (optional)</label><input id="npName" placeholder="My App" /></div>
+          <div style="flex:0 0 auto"><button id="npCreate">Create</button></div>
+        </div>
+        <div class="err" id="npErr"></div>
+      </div>
+    </section>
 
-    <h2 style="margin-top:22px">Collaborators</h2>
-    <table id="collabTable" class="hidden">
-      <thead><tr><th>Email</th><th>Projects</th><th></th></tr></thead>
-      <tbody id="collabBody"></tbody>
-    </table>
-    <div class="empty hidden" id="collabEmpty">No collaborators yet.</div>
+    <!-- Team view -->
+    <section class="view su-only" data-view="team">
+      <div class="view-head">
+        <h1>Team</h1>
+        <p>Invite collaborators to administer a specific project — not the whole instance.</p>
+      </div>
+      <div class="card">
+        <h2>Invite a collaborator</h2>
+        <p class="muted" style="font-size:13px; margin-top:0">
+          Accepting an invite grants the collaborator dashboard access to that project only.
+        </p>
+        <div class="row">
+          <div><label for="invEmail">Invitee email</label><input id="invEmail" type="email" placeholder="dev@example.com" /></div>
+          <div>
+            <label for="invProject">Project</label>
+            <select id="invProject"></select>
+          </div>
+          <div style="flex:0 0 auto"><button id="invCreate" class="secondary">Invite</button></div>
+        </div>
+        <div class="err" id="invCreateErr"></div>
+        <div id="invLink" class="hidden" style="margin-top:10px">
+          <label>Share this link with the invitee</label>
+          <input id="invLinkInput" readonly />
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Pending invitations</h2>
+        <table id="pendTable" class="hidden">
+          <thead><tr><th>Email</th><th>Project</th><th>Expires</th></tr></thead>
+          <tbody id="pendBody"></tbody>
+        </table>
+        <div class="empty hidden" id="pendEmpty">No pending invitations.</div>
+      </div>
+
+      <div class="card">
+        <h2>Collaborators</h2>
+        <table id="collabTable" class="hidden">
+          <thead><tr><th>Email</th><th>Projects</th><th></th></tr></thead>
+          <tbody id="collabBody"></tbody>
+        </table>
+        <div class="empty hidden" id="collabEmpty">No collaborators yet.</div>
+      </div>
+    </section>
+
+    <!-- Settings view -->
+    <section class="view su-only" data-view="settings">
+      <div class="view-head">
+        <h1>Settings</h1>
+        <p>Manage the platform superuser identity and passkeys.</p>
+      </div>
+      <div class="card">
+        <h2>Superuser</h2>
+        <p class="muted" style="font-size:13px; margin-top:0">
+          These credentials are propagated to every project, so the same login unlocks every project dashboard.
+        </p>
+        <div class="row">
+          <div><label for="suEmail">Email</label><input id="suEmail" type="email" /></div>
+          <div><label for="suPassword">New password</label><input id="suPassword" type="password" placeholder="leave blank to keep email only" /></div>
+          <div style="flex:0 0 auto"><button id="suSave" class="secondary">Update</button></div>
+        </div>
+        <div class="err" id="suErr"></div>
+      </div>
+
+      <div class="card">
+        <h2>Passkeys</h2>
+        <p class="muted" style="font-size:13px; margin-top:0">
+          Register a passkey to sign in to the control plane without a password.
+        </p>
+        <div id="pkWrap">
+          <table id="pkTable" class="hidden">
+            <thead><tr><th>Label</th><th>Added</th><th></th></tr></thead>
+            <tbody id="pkBody"></tbody>
+          </table>
+          <div class="empty hidden" id="pkEmpty">No passkeys registered yet.</div>
+        </div>
+        <div class="row" style="margin-top:14px">
+          <div><label for="pkLabel">Label (optional)</label><input id="pkLabel" placeholder="My Laptop" /></div>
+          <div style="flex:0 0 auto"><button id="pkAdd" class="secondary">Register a passkey</button></div>
+        </div>
+        <div class="err" id="pkErr"></div>
+      </div>
+    </section>
   </div>
-</main>
+</div>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -323,7 +441,7 @@ $("invSubmit").onclick = async () => {
   const password = $("invPassword").value;
   const r = await api("POST", "/api/invitations/accept", { token: pendingInviteToken, password });
   if (!r.ok) { $("invErr").textContent = r.data?.error || "Could not accept invitation."; return; }
-  $("invite").querySelector(".stack").innerHTML =
+  $("invite").querySelector(".card").innerHTML =
     `<h2>You're in 🎉</h2><p class="muted">You now have access to project ` +
     `<code>${r.data.projectId}</code>. <a href="${location.origin}/" class="btnlink" style="padding:8px 14px">Go to sign in</a></p>`;
 };
@@ -355,10 +473,11 @@ async function showApp() {
   who.classList.remove("hidden");
   who.innerHTML = "";
   const span = document.createElement("span");
-  const roleLabel = state.role === "collaborator" ? " (collaborator)" : "";
-  span.textContent = state.email + roleLabel + "  ";
+  span.className = "id";
+  const roleLabel = state.role === "collaborator" ? " · collaborator" : "";
+  span.textContent = state.email + roleLabel;
   const out = document.createElement("button");
-  out.className = "ghost"; out.textContent = "Sign out";
+  out.className = "ghost"; out.textContent = "Sign out"; out.style.width = "100%";
   out.onclick = async () => { await api("POST", "/api/auth/logout"); location.href = location.origin + "/"; };
   who.append(span, out);
 
@@ -367,6 +486,7 @@ async function showApp() {
   for (const el of document.querySelectorAll(".su-only")) {
     el.classList.toggle("hidden", !isSuper);
   }
+  showView("projects");
 
   if (isSuper) {
     $("suEmail").value = state.email;
@@ -517,7 +637,7 @@ async function loadProjects() {
     const tdRun = document.createElement("td");
     tdRun.innerHTML = p.running
       ? `<span class="pill active">running</span>`
-      : `<span class="muted">stopped</span>`;
+      : `<span class="pill disabled" title="Booted lazily on first request">idle</span>`;
 
     const tdAct = document.createElement("td");
     const acts = document.createElement("div"); acts.className = "actions";
@@ -632,6 +752,19 @@ $("suSave").onclick = async () => {
 // Enter-to-submit on the gate.
 for (const el of [$("gEmail"), $("gPassword")]) {
   el.addEventListener("keydown", (e) => { if (e.key === "Enter") $("gSubmit").click(); });
+}
+
+// --- sidebar view switching (additive; data loading is unchanged) ---
+function showView(name) {
+  for (const s of document.querySelectorAll(".content .view")) {
+    s.classList.toggle("active", s.dataset.view === name);
+  }
+  for (const b of document.querySelectorAll(".sidebar .nav-item")) {
+    b.classList.toggle("current", b.dataset.view === name);
+  }
+}
+for (const b of document.querySelectorAll(".sidebar .nav-item")) {
+  b.addEventListener("click", () => showView(b.dataset.view));
 }
 
 refresh();
