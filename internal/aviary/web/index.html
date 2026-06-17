@@ -128,6 +128,31 @@
   .stack > * + * { margin-top: 12px; }
   .empty { color: var(--muted); text-align: center; padding: 28px; font-size: 14px; }
 
+  /* ---------- Files editor ---------- */
+  .files-layout { display: flex; gap: 18px; align-items: stretch; }
+  .files-aside { flex: 0 0 240px; min-width: 0; border-right: 1px solid var(--border); padding-right: 18px; }
+  .files-aside-head { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px; }
+  .files-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 460px; overflow: auto; }
+  .files-list li { padding: 7px 9px; border-radius: var(--radius-sm); font-size: 13px; cursor: pointer;
+    font-family: "IBM Plex Mono", ui-monospace, monospace; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .files-list li:hover { background: var(--panel2); }
+  .files-list li.current { background: var(--accent); color: #fff; }
+  .files-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .files-main-head { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+  .files-main-head input { flex: 1; font-family: "IBM Plex Mono", ui-monospace, monospace; }
+  #fvContent { width: 100%; min-height: 440px; resize: vertical; padding: 12px 14px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel);
+    color: var(--fg); font: 13px/1.6 "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    tab-size: 2; }
+  #fvContent:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(51, 118, 229, .14); }
+  #fvContent:disabled { background: var(--panel2); color: var(--muted); }
+
+  @media (max-width: 720px) {
+    .files-layout { flex-direction: column; }
+    .files-aside { flex: none; border-right: 0; border-bottom: 1px solid var(--border);
+      padding-right: 0; padding-bottom: 14px; }
+  }
+
   @media (max-width: 720px) {
     .shell { flex-direction: column; }
     .sidebar { width: 100%; flex: none; height: auto; position: static; flex-direction: row;
@@ -230,8 +255,39 @@
       </div>
     </section>
 
-    <!-- Team view -->
-    <section class="view su-only" data-view="team">
+    <!-- Files editor view (opened per-project from the Projects table) -->
+    <section class="view" data-view="files">
+      <div class="view-head">
+        <button id="fvBack" class="ghost" style="margin-bottom:10px">← Back to projects</button>
+        <h1>Files <span class="muted" id="fvProject" style="font-weight:400"></span></h1>
+        <p>Edit the static files served from this project's <code>pb_public</code> directory at its public URL.</p>
+      </div>
+      <div class="card">
+        <div class="files-layout">
+          <div class="files-aside">
+            <div class="files-aside-head"><strong>pb_public</strong></div>
+            <ul id="fvList" class="files-list"></ul>
+            <div class="empty hidden" id="fvEmpty">No files yet.</div>
+            <div class="row" style="margin-top:12px">
+              <div><input id="fvNewPath" placeholder="index.html" /></div>
+              <div style="flex:0 0 auto"><button id="fvNew" class="secondary">New</button></div>
+            </div>
+          </div>
+          <div class="files-main">
+            <div class="files-main-head">
+              <input id="fvPath" readonly placeholder="select or create a file" />
+              <div class="actions">
+                <button id="fvSave" disabled>Save</button>
+                <button id="fvDelete" class="danger" disabled>Delete</button>
+              </div>
+            </div>
+            <textarea id="fvContent" spellcheck="false" placeholder="Select a file on the left, or create one to start editing." disabled></textarea>
+            <div class="err" id="fvErr"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
       <div class="view-head">
         <h1>Team</h1>
         <p>Invite collaborators to administer a specific project — not the whole instance.</p>
@@ -648,6 +704,12 @@ async function loadProjects() {
     if (p.status !== "active") { open.style.pointerEvents = "none"; open.style.opacity = ".5"; }
     acts.append(open);
 
+    const files = document.createElement("button");
+    files.className = "secondary"; files.textContent = "Files";
+    files.title = "Edit static files served from pb_public";
+    files.onclick = () => openFiles(p);
+    acts.append(files);
+
     if (isSuper) {
       const toggle = document.createElement("button");
       toggle.className = "secondary";
@@ -766,6 +828,97 @@ function showView(name) {
 for (const b of document.querySelectorAll(".sidebar .nav-item")) {
   b.addEventListener("click", () => showView(b.dataset.view));
 }
+
+// --- Files editor (per-project pb_public) ---
+let fvState = { id: null, name: "", current: null };
+
+function fvSetError(msg) { $("fvErr").textContent = msg || ""; }
+
+function openFiles(p) {
+  fvState = { id: p.id, name: p.name || "", current: null };
+  $("fvProject").textContent = `· ${p.id}`;
+  fvClearEditor();
+  fvSetError("");
+  showView("files");
+  loadFiles();
+}
+
+function fvClearEditor() {
+  fvState.current = null;
+  $("fvPath").value = "";
+  $("fvContent").value = "";
+  $("fvContent").disabled = true;
+  $("fvSave").disabled = true;
+  $("fvDelete").disabled = true;
+}
+
+async function loadFiles() {
+  const res = await api("GET", `/api/projects/${fvState.id}/files`);
+  const list = $("fvList");
+  list.innerHTML = "";
+  if (!res.ok) { fvSetError((res.data && res.data.error) || "Failed to load files."); return; }
+  const files = Array.isArray(res.data) ? res.data : [];
+  $("fvEmpty").classList.toggle("hidden", files.length !== 0);
+  for (const f of files) {
+    const li = document.createElement("li");
+    li.textContent = f.path;
+    li.title = `${f.path} · ${f.size} bytes`;
+    if (f.path === fvState.current) li.classList.add("current");
+    li.onclick = () => openFile(f.path);
+    list.append(li);
+  }
+}
+
+async function openFile(path) {
+  fvSetError("");
+  const res = await api("GET", `/api/projects/${fvState.id}/files/content?path=${encodeURIComponent(path)}`);
+  if (!res.ok) { fvSetError((res.data && res.data.error) || "Failed to open file."); return; }
+  fvState.current = res.data.path;
+  $("fvPath").value = res.data.path;
+  $("fvContent").value = res.data.content;
+  $("fvContent").disabled = false;
+  $("fvSave").disabled = false;
+  $("fvDelete").disabled = false;
+  for (const li of $("fvList").children) li.classList.toggle("current", li.textContent === fvState.current);
+}
+
+async function saveFile() {
+  if (!fvState.current) return;
+  fvSetError("");
+  const res = await api("PUT", `/api/projects/${fvState.id}/files/content`, {
+    path: fvState.current, content: $("fvContent").value,
+  });
+  if (!res.ok) { fvSetError((res.data && res.data.error) || "Failed to save file."); return; }
+  await loadFiles();
+}
+
+async function deleteFile() {
+  if (!fvState.current) return;
+  if (!confirm(`Delete "${fvState.current}"?`)) return;
+  fvSetError("");
+  const res = await api("DELETE", `/api/projects/${fvState.id}/files/content?path=${encodeURIComponent(fvState.current)}`);
+  if (!res.ok) { fvSetError((res.data && res.data.error) || "Failed to delete file."); return; }
+  fvClearEditor();
+  await loadFiles();
+}
+
+async function newFile() {
+  const path = $("fvNewPath").value.trim();
+  if (!path) { fvSetError("Enter a file path, e.g. index.html"); return; }
+  fvSetError("");
+  const res = await api("PUT", `/api/projects/${fvState.id}/files/content`, { path, content: "" });
+  if (!res.ok) { fvSetError((res.data && res.data.error) || "Failed to create file."); return; }
+  $("fvNewPath").value = "";
+  await loadFiles();
+  await openFile(res.data.path);
+  $("fvContent").focus();
+}
+
+$("fvBack").addEventListener("click", () => showView("projects"));
+$("fvSave").addEventListener("click", saveFile);
+$("fvDelete").addEventListener("click", deleteFile);
+$("fvNew").addEventListener("click", newFile);
+$("fvNewPath").addEventListener("keydown", (e) => { if (e.key === "Enter") newFile(); });
 
 refresh();
 </script>

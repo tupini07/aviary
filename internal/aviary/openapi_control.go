@@ -29,6 +29,11 @@ func controlOpenAPI(serverURL string) oa {
 		"description": "Collaborator email address.",
 		"schema":      oa{"type": "string", "format": "email"},
 	}
+	filePathParam := oa{
+		"name": "path", "in": "query", "required": true,
+		"description": "File path relative to pb_public, forward-slash separated (e.g. index.html or css/app.css).",
+		"schema":      oa{"type": "string"},
+	}
 
 	paths := oa{
 		"/api/openapi.json": oa{
@@ -143,6 +148,33 @@ func controlOpenAPI(serverURL string) oa {
 				"responses":   oa{"302": oa{"description": "Redirect to the project SSO handoff"}, "401": errResp("Authentication required"), "403": errResp("No dashboard access to this project")},
 			},
 		},
+		"/api/projects/{id}/files": oa{
+			"get": oa{
+				"tags": []any{"files"}, "summary": "List static files served from the project's pb_public directory",
+				"description": "Superusers may list any project's files; collaborators only projects they have been granted.",
+				"parameters":  []any{idParam},
+				"responses":   oa{"200": oa{"description": "Flat, sorted file listing", "content": jsonBody(oa{"type": "array", "items": ref("FileEntry")})["content"]}, "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found")},
+			},
+		},
+		"/api/projects/{id}/files/content": oa{
+			"get": oa{
+				"tags": []any{"files"}, "summary": "Read a single pb_public file",
+				"parameters": []any{idParam, filePathParam},
+				"responses":  oa{"200": oa{"description": "File content", "content": jsonBody(ref("FileContent"))["content"]}, "400": errResp("Invalid path"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("File not found"), "413": errResp("File is too large to edit")},
+			},
+			"put": oa{
+				"tags": []any{"files"}, "summary": "Create or overwrite a pb_public file",
+				"description": "Creates any missing parent directories. Files are served live, so changes are visible immediately at the project URL.",
+				"parameters":  []any{idParam},
+				"requestBody": jsonBody(ref("FileContent")),
+				"responses":   oa{"200": oa{"description": "File written", "content": jsonBody(ref("FileEntry"))["content"]}, "400": errResp("Invalid path"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found"), "413": errResp("Content is too large")},
+			},
+			"delete": oa{
+				"tags": []any{"files"}, "summary": "Delete a single pb_public file",
+				"parameters": []any{idParam, filePathParam},
+				"responses":  oa{"204": oa{"description": "Deleted"}, "400": errResp("Invalid path"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("File not found")},
+			},
+		},
 		"/api/superuser": oa{
 			"get": oa{
 				"tags": []any{"superuser"}, "summary": "Describe the platform superuser (superuser only)",
@@ -208,6 +240,7 @@ func controlOpenAPI(serverURL string) oa {
 			oa{"name": "auth", "description": "Session authentication"},
 			oa{"name": "passkey", "description": "WebAuthn passkeys"},
 			oa{"name": "projects", "description": "Project (cage) lifecycle"},
+			oa{"name": "files", "description": "Per-project static files (pb_public)"},
 			oa{"name": "superuser", "description": "Platform superuser"},
 			oa{"name": "collaborators", "description": "Per-project collaborators"},
 			oa{"name": "invitations", "description": "Collaborator invitations"},
@@ -292,6 +325,22 @@ func controlOpenAPI(serverURL string) oa {
 					"properties": oa{
 						"email":    oa{"type": "string", "format": "email"},
 						"projects": oa{"type": "array", "items": oa{"type": "string"}},
+					},
+				},
+				"FileEntry": oa{
+					"type": "object",
+					"properties": oa{
+						"path":     oa{"type": "string", "description": "Path relative to pb_public, forward-slash separated."},
+						"size":     oa{"type": "integer", "format": "int64", "description": "File size in bytes."},
+						"modified": oa{"type": "string", "format": "date-time"},
+					},
+				},
+				"FileContent": oa{
+					"type":     "object",
+					"required": []any{"path", "content"},
+					"properties": oa{
+						"path":    oa{"type": "string", "description": "Path relative to pb_public, forward-slash separated."},
+						"content": oa{"type": "string", "description": "UTF-8 text content of the file."},
 					},
 				},
 				"Invitation": oa{

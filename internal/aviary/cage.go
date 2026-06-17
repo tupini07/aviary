@@ -64,7 +64,7 @@ func (c *cage) start(projectsDir string, log *slog.Logger) error {
 			})
 	}
 
-	handler, err := buildHandler(app)
+	handler, err := buildHandler(app, filepath.Join(dir, "pb_public"))
 	if err != nil {
 		_ = app.ResetBootstrapState()
 		return err

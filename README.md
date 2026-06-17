@@ -178,6 +178,10 @@ curl -s -b cj -i http://127.0.0.1:8090/api/projects/alpha/dashboard
 | `GET /api/projects/{id}/dashboard`| any¹            | SSO into the project dashboard   |
 | `PATCH /api/projects/{id}`        | superuser       | Enable/disable/rename a project  |
 | `DELETE /api/projects/{id}`       | superuser       | Delete a project + its data      |
+| `GET /api/projects/{id}/files`    | any¹            | List the project's pb_public files |
+| `GET /api/projects/{id}/files/content?path=…` | any¹ | Read a pb_public file            |
+| `PUT /api/projects/{id}/files/content` | any¹       | Create/overwrite a pb_public file |
+| `DELETE /api/projects/{id}/files/content?path=…` | any¹ | Delete a pb_public file       |
 | `GET /api/projects`               | any¹            | List projects (scoped by access) |
 | `POST /api/invitations`           | superuser       | Invite a collaborator to a project |
 | `GET /api/invitations`            | superuser       | List pending invitations         |
@@ -187,9 +191,9 @@ curl -s -b cj -i http://127.0.0.1:8090/api/projects/alpha/dashboard
 | `POST /api/auth/passkey/login/*`  | public          | Superuser passwordless sign-in   |
 | `POST /api/auth/passkey/register/*` | superuser     | Enroll a superuser passkey       |
 
-¹ `GET /api/projects` and `GET /api/projects/{id}` are available to collaborators
-too, but only return the projects they have been granted; mutations are
-superuser-only.
+¹ `GET /api/projects`, `GET /api/projects/{id}`, the dashboard SSO and the
+per-project `files` endpoints are available to collaborators too, but only for
+the projects they have been granted; instance-wide mutations are superuser-only.
 
 ² `PUT /api/superuser` is allowed unauthenticated **only** for first-run setup
 (while no superuser exists); afterwards it requires a session.
@@ -222,6 +226,40 @@ curl -s http://alpha.localhost:8090/__aviary/openapi.json | jq '.paths | keys'
 Realtime, batch, file-token and OAuth2 endpoints are part of PocketBase but are
 not enumerated in the per-project spec; see <https://pocketbase.io/docs/> for
 the full PocketBase reference.
+
+### Static file hosting & editor (pb_public)
+
+Each project can serve static assets (HTML/CSS/JS, a landing page, a full SPA)
+straight from its own `pb_public` directory, exactly like a stock PocketBase
+install. The files live at `projects/<id>/pb_public/` and are served at the
+project's public root:
+
+```
+https://<id>.<host>/            → projects/<id>/pb_public/index.html
+https://<id>.<host>/css/app.css → projects/<id>/pb_public/css/app.css
+```
+
+Files are read live from disk, so edits show up immediately with no project
+reboot. The API (`/api/...`) and admin dashboard (`/_/...`) always take
+precedence over the static fallback.
+
+You can manage these files without server/SSH access: the control-plane UI has a
+per-project **Files** button (in the Projects table) that opens a simple editor —
+list, view, edit, create and delete files — backed by the
+`/api/projects/{id}/files` endpoints above. Access mirrors the dashboard:
+superusers may edit any project, collaborators only the projects they've been
+granted. Paths are confined to `pb_public` (traversal outside it is rejected),
+and editable files are capped at 5 MiB.
+
+```bash
+# upload/overwrite a file
+curl -s -b cj -X PUT http://127.0.0.1:8090/api/projects/alpha/files/content \
+  -H 'Content-Type: application/json' \
+  -d '{"path":"index.html","content":"<h1>hello</h1>"}'
+
+# it is now served at the project root
+curl -s http://alpha.localhost:8090/
+```
 
 ### Passkeys (WebAuthn)
 
@@ -277,6 +315,7 @@ control-plane SSO handoff to sign in.
 | `internal/aviary/superuser_propagation.go` | Propagate superuser into each project    |
 | `internal/aviary/superuser_passkey.go` | Superuser WebAuthn ceremonies (control plane) |
 | `internal/aviary/dashboard_sso.go`  | One-click dashboard SSO (ticket → minted token) |
+| `internal/aviary/files.go`          | Per-project pb_public file editor API (list/read/write/delete) |
 | `internal/aviary/openapi.go` + `openapi_control.go` + `openapi_project.go` | OpenAPI 3.1 specs (control plane + on-the-fly per project) |
 | `internal/aviary/collaborators.go` + `collaborator_api.go` | Invitations + project-scoped collaborators |
 | `internal/aviary/ui.go` + `web/`    | Embedded control-plane web UI                   |
@@ -299,4 +338,5 @@ control-plane SSO handoff to sign in.
 - [x] Invitation flow with project-scoped collaborators
 - [x] One-click dashboard SSO + disabled PocketBase password login (no brute-force surface)
 - [x] Auto-generated OpenAPI 3.1 specs (control plane + on-the-fly per project)
+- [x] Static file hosting per project (`pb_public`) + in-browser file editor
 - [ ] Per-project quotas and metrics

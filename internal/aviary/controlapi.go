@@ -39,6 +39,13 @@ func (a *Aviary) controlHandler() http.Handler {
 	// caller into the project's PocketBase admin dashboard, already logged in.
 	mux.HandleFunc("GET /api/projects/{id}/dashboard", a.requireAuth(a.apiDashboardSSO))
 
+	// Static file editor for each project's pb_public directory. Available to
+	// superusers and to collaborators granted the project.
+	mux.HandleFunc("GET /api/projects/{id}/files", a.requireAuth(a.apiListFiles))
+	mux.HandleFunc("GET /api/projects/{id}/files/content", a.requireAuth(a.apiReadFile))
+	mux.HandleFunc("PUT /api/projects/{id}/files/content", a.requireAuth(a.apiWriteFile))
+	mux.HandleFunc("DELETE /api/projects/{id}/files/content", a.requireAuth(a.apiDeleteFile))
+
 	mux.HandleFunc("GET /api/superuser", a.requireSuperuser(a.apiGetSuperuser))
 	// PUT is allowed without auth only for first-run setup (no superuser yet);
 	// afterwards it requires an authenticated superuser session.
