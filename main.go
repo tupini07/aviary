@@ -23,6 +23,12 @@ import (
 var version = "(untracked)"
 
 func main() {
+	// Subcommand dispatch must run before flag.Parse so `aviary update ...`
+	// can have its own flags without colliding with the server flags below.
+	if len(os.Args) > 1 && os.Args[1] == "update" {
+		os.Exit(runUpdate(os.Args[2:], version, os.Stdout))
+	}
+
 	addr := flag.String("addr", envOr("AVIARY_ADDR", "127.0.0.1:8090"), "address for the Aviary front server")
 	dataDir := flag.String("data", envOr("AVIARY_DATA", "./data"), "parent dir holding control.db and projects/")
 	idleTTL := flag.Duration("idle-ttl", envDuration("AVIARY_IDLE_TTL", 5*time.Minute), "evict a project's app after this much inactivity")
@@ -46,6 +52,8 @@ func main() {
 		log.Fatalf("aviary: init: %v", err)
 	}
 	defer av.Shutdown()
+
+	cleanupStaleBinary()
 
 	seedProjects(av, *seed)
 	bootstrapSuperuser(av)
@@ -107,6 +115,17 @@ func bootstrapSuperuser(av *aviary.Aviary) {
 		return
 	}
 	slog.Info("bootstrapped control-plane superuser from environment", "email", email)
+}
+
+// cleanupStaleBinary removes the ".old" backup left by a Windows self-update,
+// which cannot delete the still-running executable during the update itself.
+// Best-effort and a no-op on other platforms / when no backup exists.
+func cleanupStaleBinary() {
+	exe, err := resolveExecutable()
+	if err != nil {
+		return
+	}
+	_ = os.Remove(exe + ".old")
 }
 
 // envOr returns the value of the named environment variable, or def if it is

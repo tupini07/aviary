@@ -110,6 +110,25 @@ dry-run the release pipeline locally, install GoReleaser and run
 
 [GoReleaser]: https://goreleaser.com
 
+### Updating
+
+Once a release is published, upgrade in place with the built-in self-updater —
+no need to fetch artifacts by hand:
+
+```sh
+aviary update            # download + verify + install the latest release
+aviary update --check    # report the latest version without installing
+aviary update --version v0.2.0   # pin a specific version
+```
+
+`update` queries the GitHub releases API, picks the archive matching the running
+`GOOS`/`GOARCH`, verifies its SHA-256 against the release `checksums.txt`, then
+**atomically** swaps the new binary over the current executable (keeping a backup
+for rollback). It refuses to run from a non-release `(untracked)` build unless
+you pass `--force`, and points at `tupini07/aviary` by default (override with
+`--repo owner/name` for forks). A running server must be restarted to pick up the
+new binary — the update replaces the file, it does not hot-reload the process.
+
 ## Control plane (web UI + API)
 
 The control plane is served on the bare host (no project subdomain), e.g.
@@ -392,6 +411,7 @@ control-plane SSO handoff to sign in.
 | Path                                | Responsibility                                  |
 | ----------------------------------- | ----------------------------------------------- |
 | `main.go`                           | Flags + front HTTP server + `--seed`            |
+| `selfupdate.go`                     | `aviary update` (download + checksum + atomic binary swap) |
 | `internal/aviary/aviary.go`         | Registry, subdomain routing, idle eviction      |
 | `internal/aviary/provisioning.go`   | Create/list/delete/disable projects             |
 | `internal/aviary/controlapi.go`     | Control-plane JSON API (projects + superuser)   |
@@ -429,5 +449,5 @@ control-plane SSO handoff to sign in.
 - [x] Static file hosting per project (`pb_public`) + in-browser file editor + SPA fallback toggle
 - [x] Project-scoped API keys for agents/CI (bearer auth on the file/deploy endpoints)
 - [x] Atomic archive deploy endpoint + GitHub Action (build in CI, push artifact)
-- [ ] Self-update command (`aviary update` — download + verify the matching GitHub release, atomic binary swap)
+- [x] Self-update command (`aviary update` — download + verify the matching GitHub release, atomic binary swap)
 - [ ] Per-project quotas and metrics
