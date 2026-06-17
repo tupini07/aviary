@@ -902,11 +902,11 @@ async function loadProjects() {
     if (p.status !== "active") { open.style.pointerEvents = "none"; open.style.opacity = ".5"; }
     acts.append(open);
 
-    const files = document.createElement("button");
-    files.className = "secondary"; files.textContent = "Files";
-    files.title = "Edit static files served from pb_public";
-    files.onclick = () => openFiles(p);
-    acts.append(files);
+    const manage = document.createElement("button");
+    manage.className = "secondary"; manage.textContent = "Manage";
+    manage.title = "Open this project's workspace (files, API keys, settings)";
+    manage.onclick = () => openFiles(p);
+    acts.append(manage);
 
     if (isSuper) {
       const toggle = document.createElement("button");
