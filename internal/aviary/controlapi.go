@@ -37,7 +37,9 @@ func (a *Aviary) controlHandler() http.Handler {
 
 	// One-click dashboard SSO: mints a single-use ticket and redirects the
 	// caller into the project's PocketBase admin dashboard, already logged in.
-	mux.HandleFunc("GET /api/projects/{id}/dashboard", a.requireAuth(a.apiDashboardSSO))
+	// Auth is enforced inside the handler (not via requireAuth) so an
+	// unauthenticated browser is sent to the login page rather than a JSON 401.
+	mux.HandleFunc("GET /api/projects/{id}/dashboard", a.apiDashboardSSO)
 
 	// Static file editor for each project's pb_public directory. Available to
 	// superusers and to collaborators granted the project.

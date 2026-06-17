@@ -217,3 +217,10 @@ func (a *Aviary) setSessionCookie(w http.ResponseWriter, r *http.Request, email,
 func isHTTPS(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
+
+// acceptsHTML reports whether the request looks like a top-level browser
+// navigation (as opposed to an API/XHR call), so an unauthenticated caller can
+// be redirected to the login page rather than handed a JSON 401.
+func acceptsHTML(r *http.Request) bool {
+	return strings.Contains(r.Header.Get("Accept"), "text/html")
+}

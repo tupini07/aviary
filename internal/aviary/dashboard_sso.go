@@ -28,6 +28,19 @@ const ssoTicketTTL = 60 * time.Second
 // cannot collide with any PocketBase route.
 const ssoPath = "/__aviary/sso"
 
+// dashboardCookie marks a browser, on a single project subdomain, as having
+// completed a control-plane-authenticated dashboard handoff. Its presence lets
+// the admin UI (/_/) load; its absence funnels the browser back through the SSO
+// mint flow. It is host-only (scoped to the one project subdomain) and signed,
+// so it cannot be forged or replayed against another project.
+const dashboardCookie = "aviary_dash"
+
+// dashboardSessionTTL bounds how long a dashboard cookie is accepted before the
+// browser must re-run the (transparent, when the control-plane session is still
+// valid) SSO handoff. It is kept comfortably below PocketBase's auth-token
+// lifetime so the seeded localStorage token never outlives this gate.
+const dashboardSessionTTL = time.Hour
+
 // ticketStore records consumed SSO ticket nonces so a ticket can be redeemed at
 // most once, even within its (short) validity window.
 type ticketStore struct {
@@ -109,10 +122,18 @@ func (a *Aviary) verifySSOTicket(ticket string) (email, projectID string, ok boo
 // redirects them to the target project's dashboard, where Aviary completes the
 // handoff by minting a PocketBase auth token. Superusers may open any project;
 // collaborators only the projects granted to them.
+//
+// It is registered without requireAuth so an unauthenticated browser (e.g. one
+// bounced here by the project's /_/ gate) can be sent to the control-plane login
+// page instead of receiving a bare 401.
 func (a *Aviary) apiDashboardSSO(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	email, role, ok := a.identity(r)
 	if !ok {
+		if acceptsHTML(r) {
+			http.Redirect(w, r, "/", http.StatusFound)
+			return
+		}
 		a.apiError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
@@ -200,6 +221,11 @@ func (a *Aviary) handleProjectSSO(w http.ResponseWriter, r *http.Request, id str
 		return
 	}
 
+	// Mark this browser as control-plane-authenticated for this project's admin
+	// UI so the /_/ gate lets the dashboard load (and reload) without bouncing
+	// back through the SSO flow on every request.
+	a.setDashboardCookie(w, r, email, id)
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	fmt.Fprintf(w, ssoBootstrapHTML, auth)
@@ -220,7 +246,103 @@ const ssoBootstrapHTML = `<!doctype html><html><head><meta charset="utf-8"><titl
 	`localStorage.setItem("pocketbase_auth",a);}catch(e){}` +
 	`location.replace("/_/");</script>Opening dashboard…</body></html>`
 
-// projectSSOURL builds the absolute URL of a project's SSO handoff endpoint,
+// isDashboardPath reports whether p targets PocketBase's admin UI, which lives
+// under /_/. These are the only requests Aviary gates behind a control-plane
+// SSO handoff; the project's own API and static (pb_public) files stay open.
+func isDashboardPath(p string) bool {
+	return p == "/_" || p == "/_/" || strings.HasPrefix(p, "/_/")
+}
+
+// dashboardAuthorized reports whether the request carries a valid, unexpired
+// dashboard cookie for project id.
+func (a *Aviary) dashboardAuthorized(r *http.Request, id string) bool {
+	c, err := r.Cookie(dashboardCookie)
+	if err != nil {
+		return false
+	}
+	return a.verifyDashboardSession(c.Value, id)
+}
+
+// signDashboardSession builds a signed token of the form
+// "<email>|<projectID>|<expiryUnix>|<hmac>" authorising the holder to load the
+// admin UI of a specific project until the expiry.
+func (a *Aviary) signDashboardSession(email, projectID string, expiry time.Time) string {
+	payload := strings.Join([]string{email, projectID, strconv.FormatInt(expiry.Unix(), 10)}, "|")
+	mac := a.sessionMAC(payload)
+	return base64.RawURLEncoding.EncodeToString([]byte(payload + "|" + mac))
+}
+
+// verifyDashboardSession validates a dashboard token's signature, expiry and
+// that it was issued for projectID.
+func (a *Aviary) verifyDashboardSession(token, projectID string) bool {
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(string(raw), "|")
+	if len(parts) != 4 {
+		return false
+	}
+	email, pid, expiryStr, gotMAC := parts[0], parts[1], parts[2], parts[3]
+	if pid != projectID {
+		return false
+	}
+	wantMAC := a.sessionMAC(strings.Join([]string{email, pid, expiryStr}, "|"))
+	if !hmac.Equal([]byte(gotMAC), []byte(wantMAC)) {
+		return false
+	}
+	expiryUnix, err := strconv.ParseInt(expiryStr, 10, 64)
+	if err != nil || time.Now().After(time.Unix(expiryUnix, 0)) {
+		return false
+	}
+	return true
+}
+
+// setDashboardCookie issues a host-only, signed dashboard cookie on the current
+// (project subdomain) host.
+func (a *Aviary) setDashboardCookie(w http.ResponseWriter, r *http.Request, email, projectID string) {
+	expiry := time.Now().Add(dashboardSessionTTL)
+	http.SetCookie(w, &http.Cookie{
+		Name:     dashboardCookie,
+		Value:    a.signDashboardSession(email, projectID, expiry),
+		Path:     "/",
+		Expires:  expiry,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   isHTTPS(r),
+	})
+}
+
+// redirectToDashboardSSO bounces a browser that reached a gated admin UI without
+// a dashboard cookie to the control plane's SSO endpoint, which (if the caller
+// holds a control-plane session) mints a ticket and sends them straight back,
+// already authenticated.
+func (a *Aviary) redirectToDashboardSSO(w http.ResponseWriter, r *http.Request, id string) {
+	scheme := "http"
+	if isHTTPS(r) {
+		scheme = "https"
+	}
+	target := fmt.Sprintf("%s://%s/api/projects/%s/dashboard", scheme, controlHostFromProject(r.Host), id)
+	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// controlHostFromProject derives the control-plane host (including port) that
+// serves the management UI, given a project subdomain host. It is the inverse of
+// projectHostFromControl: it swaps the leading project-id label for the
+// canonical control label so the browser can be bounced to the control plane.
+func controlHostFromProject(projectHost string) string {
+	hostname := projectHost
+	port := ""
+	if h, p, err := net.SplitHostPort(projectHost); err == nil {
+		hostname, port = h, ":"+p
+	}
+	_, rest, found := strings.Cut(hostname, ".")
+	if !found {
+		return controlLabel + "." + hostname + port
+	}
+	return controlLabel + "." + rest + port
+}
+
 // derived from the control-plane request host. A bare IP control host cannot
 // carry a project subdomain label (e.g. "p2uy3f.127.0.0.1" is unresolvable), so
 // it falls back to *.localhost, which browsers resolve to loopback.

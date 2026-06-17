@@ -151,9 +151,9 @@ func controlOpenAPI(serverURL string) oa {
 		"/api/projects/{id}/dashboard": oa{
 			"get": oa{
 				"tags": []any{"projects"}, "summary": "One-click dashboard SSO redirect",
-				"description": "Mints a single-use ticket and 302-redirects into the project's PocketBase admin dashboard, already logged in.",
+				"description": "Mints a single-use ticket and 302-redirects into the project's PocketBase admin dashboard, already logged in. Unauthenticated browser navigations (Accept: text/html) are 302-redirected to the control-plane login page instead of receiving a 401.",
 				"parameters":  []any{idParam},
-				"responses":   oa{"302": oa{"description": "Redirect to the project SSO handoff"}, "401": errResp("Authentication required"), "403": errResp("No dashboard access to this project")},
+				"responses":   oa{"302": oa{"description": "Redirect to the project SSO handoff (or to the login page when unauthenticated in a browser)"}, "401": errResp("Authentication required"), "403": errResp("No dashboard access to this project")},
 			},
 		},
 		"/api/projects/{id}/files": oa{

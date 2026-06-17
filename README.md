@@ -161,11 +161,20 @@ redirects you to the project's subdomain, where Aviary mints a PocketBase
 superuser **auth token** and drops you into `/_/` already logged in. Your
 control-plane passkey therefore effectively unlocks every project dashboard too.
 
+The admin UI (`/_/`) is **gated**: any browser that reaches it without a valid,
+control-plane-issued dashboard session is bounced through this SSO flow first, so
+you never see PocketBase's own login page. If you are already signed into the
+control plane the round-trip is invisible (a couple of redirects); if not, you
+land on the control-plane login page. A short-lived, signed, host-only cookie
+(`aviary_dash`) marks a browser as authorized for that one project's dashboard so
+subsequent loads aren't re-bounced.
+
 For security, PocketBase's native superuser **password login is disabled** on
 every project by default — with no password endpoint there is nothing to
 brute-force, and the only way in is an Aviary-minted token. Set
 `AVIARY_PB_PASSWORD_LOGIN=true` (or `--allow-dashboard-password`) to re-enable
-native password login if you need it.
+native password login if you need it; doing so also leaves the `/_/` login page
+ungated so you can use it.
 
 ```sh
 # first-run setup (only allowed while no superuser exists)
@@ -435,9 +444,10 @@ project.
 
 Open a project's admin dashboard from the control plane via the **Dashboard**
 button (recommended — it logs you in automatically). Direct navigation to
-`http://alpha.localhost:8090/_/` works too (`*.localhost` resolves to loopback
-in most browsers), but native password login is disabled by default, so use the
-control-plane SSO handoff to sign in.
+`http://alpha.localhost:8090/_/` works too (`*.localhost` resolves to loopback in
+most browsers): because the admin UI is gated, you'll be bounced through the
+control-plane SSO handoff and dropped in already logged in (or sent to the
+control-plane login page first if you have no session).
 
 ## Layout
 
@@ -478,7 +488,7 @@ control-plane SSO handoff to sign in.
 - [x] Passkey login for superusers (dashboard)
 - [x] Env-var configuration + headless superuser bootstrap
 - [x] Invitation flow with project-scoped collaborators
-- [x] One-click dashboard SSO + disabled PocketBase password login (no brute-force surface)
+- [x] One-click dashboard SSO + gated `/_/` (no PocketBase login page) + disabled password login (no brute-force surface)
 - [x] Auto-generated OpenAPI 3.1 specs (control plane + on-the-fly per project)
 - [x] Static file hosting per project (`pb_public`) + in-browser file editor + SPA fallback toggle
 - [x] Project-scoped API keys for agents/CI (bearer auth on the file/deploy endpoints)

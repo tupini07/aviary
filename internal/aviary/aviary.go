@@ -68,6 +68,10 @@ type Aviary struct {
 	wg   sync.WaitGroup
 }
 
+// controlLabel is the canonical control-plane subdomain label. It is a valid
+// DNS label and is reserved (see below) so it can never name a tenant project.
+const controlLabel = "aviary-console"
+
 // reserved holds host labels that never map to a project and are instead
 // served by the control plane. "aviary-console" is the canonical control-plane
 // subdomain: it is a valid DNS label (so it works behind a reverse proxy on a
@@ -77,7 +81,7 @@ type Aviary struct {
 // "_console" and "_" are kept as legacy aliases for local/curl testing via an
 // explicit Host header; they are unreachable over real DNS (underscores are
 // invalid in hostnames) but cost nothing to keep.
-var reserved = map[string]bool{"aviary-console": true, "www": true, "_console": true, "_": true}
+var reserved = map[string]bool{controlLabel: true, "www": true, "_console": true, "_": true}
 
 // New creates an Aviary, opens its control-plane store and starts the
 // background idle-eviction reaper.
@@ -174,6 +178,15 @@ func (a *Aviary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Serve a generated OpenAPI description of this project's PocketBase API.
 	if r.URL.Path == openapiPath {
 		a.handleProjectOpenAPI(w, r, id, c)
+		return
+	}
+
+	// Gate the PocketBase admin UI (/_/...) behind a control-plane-authenticated
+	// SSO handoff so tenants never see (or use) PocketBase's own login page.
+	// When the operator has opted into PocketBase password login, leave the
+	// native dashboard login open instead.
+	if !a.cfg.AllowDashboardPassword && isDashboardPath(r.URL.Path) && !a.dashboardAuthorized(r, id) {
+		a.redirectToDashboardSSO(w, r, id)
 		return
 	}
 
