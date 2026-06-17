@@ -24,6 +24,12 @@ func (m *Manager) bindRoutes(se *core.ServeEvent) {
 	// Login is passwordless/discoverable: no prior auth needed.
 	se.Router.POST(routePrefix+"/login/begin", m.loginBegin)
 	se.Router.POST(routePrefix+"/login/finish", m.loginFinish)
+
+	// Self-service management of the authenticated user's own passkeys.
+	se.Router.GET(routePrefix, m.list).
+		Bind(apis.RequireAuth(UserCollection))
+	se.Router.DELETE(routePrefix+"/{id}", m.delete).
+		Bind(apis.RequireAuth(UserCollection))
 }
 
 // finishRequest is the shared body for the finish endpoints: the ceremony token
@@ -167,4 +173,31 @@ func (m *Manager) loginFinish(e *core.RequestEvent) error {
 	}
 
 	return apis.RecordAuthResponse(e, authedRecord, "passkey", nil)
+}
+
+// list returns the authenticated user's own registered passkeys (metadata only;
+// the underlying credential material is never exposed).
+func (m *Manager) list(e *core.RequestEvent) error {
+	creds, err := listUserPasskeys(m.app, e.Auth.Id)
+	if err != nil {
+		return e.InternalServerError("could not list passkeys", err)
+	}
+	return e.JSON(http.StatusOK, creds)
+}
+
+// delete removes one of the authenticated user's own passkeys by credential id.
+// The lookup is scoped to the caller, so a user cannot delete another's passkey.
+func (m *Manager) delete(e *core.RequestEvent) error {
+	id := e.Request.PathValue("id")
+	if id == "" {
+		return e.BadRequestError("credential id is required", nil)
+	}
+	found, err := deleteUserPasskey(m.app, e.Auth.Id, id)
+	if err != nil {
+		return e.InternalServerError("could not delete passkey", err)
+	}
+	if !found {
+		return e.NotFoundError("passkey not found", nil)
+	}
+	return e.JSON(http.StatusOK, map[string]any{"deleted": true})
 }

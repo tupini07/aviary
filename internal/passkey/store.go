@@ -108,3 +108,45 @@ func hasCredentials(app core.App, userId string) (bool, error) {
 	}
 	return len(records) > 0, nil
 }
+
+// credentialInfo is the public, non-sensitive view of a stored passkey. The
+// WebAuthn material in the "data" column is deliberately never exposed.
+type credentialInfo struct {
+	CredentialID string `json:"credentialId"`
+	Label        string `json:"label"`
+	Created      string `json:"created"`
+}
+
+// listUserPasskeys returns the non-sensitive metadata for every passkey owned
+// by userId, so a user can review their enrolled credentials.
+func listUserPasskeys(app core.App, userId string) ([]credentialInfo, error) {
+	records, err := app.FindAllRecords(CollectionName, dbx.HashExp{"userId": userId})
+	if err != nil {
+		return nil, fmt.Errorf("passkey: list credentials: %w", err)
+	}
+	out := make([]credentialInfo, 0, len(records))
+	for _, rec := range records {
+		out = append(out, credentialInfo{
+			CredentialID: rec.GetString("credentialId"),
+			Label:        rec.GetString("label"),
+			Created:      rec.GetString("created"),
+		})
+	}
+	return out, nil
+}
+
+// deleteUserPasskey removes a single passkey owned by userId, identified by its
+// credentialId. Scoping the lookup to userId ensures a user can only delete
+// their own credentials. It reports whether a matching credential was found.
+func deleteUserPasskey(app core.App, userId, credentialId string) (bool, error) {
+	rec, err := app.FindFirstRecordByFilter(CollectionName,
+		"credentialId = {:cid} && userId = {:uid}",
+		dbx.Params{"cid": credentialId, "uid": userId})
+	if err != nil {
+		return false, nil // not found (or not owned by this user)
+	}
+	if err := app.Delete(rec); err != nil {
+		return false, fmt.Errorf("passkey: delete credential: %w", err)
+	}
+	return true, nil
+}

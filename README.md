@@ -195,11 +195,23 @@ superuser-only.
 
 ### Passkeys (WebAuthn)
 
-Project users sign in with passkeys via `internal/passkey` (built on
-`go-webauthn`), mounted on every project under `/api/aviary/passkey/*`:
-`register/begin`, `register/finish` (authenticated), and passwordless
-`login/begin`, `login/finish` (discoverable). Credentials live in each
-project's `_passkeys` collection.
+Project users (records in each project's `users` collection) sign in with
+passkeys via `internal/passkey` (built on `go-webauthn`), mounted on every
+project under `/api/aviary/passkey/*`:
+
+| Method & path                              | Auth          | Purpose                          |
+| ------------------------------------------ | ------------- | -------------------------------- |
+| `POST /api/aviary/passkey/register/begin`  | user          | Start enrolling a passkey        |
+| `POST /api/aviary/passkey/register/finish` | user          | Finish enrollment                |
+| `POST /api/aviary/passkey/login/begin`     | public        | Start passwordless login         |
+| `POST /api/aviary/passkey/login/finish`    | public        | Finish login → user auth token   |
+| `GET /api/aviary/passkey`                  | user          | List the caller's own passkeys   |
+| `DELETE /api/aviary/passkey/{id}`          | user          | Delete one of the caller's passkeys |
+
+Login is discoverable/passwordless; registration and self-management require the
+user's bearer token, and management is scoped to the caller so a user only ever
+sees or deletes their own credentials. Credentials live in each project's
+API-locked `_passkeys` collection.
 
 The control-plane **superuser** can also register a passkey and sign in to the
 dashboard without a password — see the "Sign in with a passkey" button on the

@@ -201,6 +201,109 @@ func wrapPublicKey(inner json.RawMessage) string {
 	return string(b)
 }
 
+// registerPasskey runs the full enrollment ceremony for an authenticated user
+// and returns the registered credential id. It mirrors the registration steps
+// in TestPasskeyRegisterAndLogin and is used by the management tests.
+func registerPasskey(t *testing.T, av *Aviary, id, token string, label string) string {
+	t.Helper()
+	rp := virtualwebauthn.RelyingParty{ID: id + ".localhost", Name: "Aviary", Origin: "http://" + id + ".localhost"}
+	authenticator := virtualwebauthn.NewAuthenticator()
+	credential := virtualwebauthn.NewCredential(virtualwebauthn.KeyTypeEC2)
+
+	rec := doProject(t, av, id, http.MethodPost, "/api/aviary/passkey/register/begin", token, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("register/begin: status %d body %s", rec.Code, rec.Body.String())
+	}
+	var begin struct {
+		Token     string          `json:"token"`
+		PublicKey json.RawMessage `json:"publicKey"`
+	}
+	mustJSON(t, rec.Body.Bytes(), &begin)
+
+	attOpts, err := virtualwebauthn.ParseAttestationOptions(wrapPublicKey(begin.PublicKey))
+	if err != nil {
+		t.Fatalf("parse attestation options: %v", err)
+	}
+	attResp := virtualwebauthn.CreateAttestationResponse(rp, authenticator, credential, *attOpts)
+	finishBody, _ := json.Marshal(map[string]any{"token": begin.Token, "label": label, "response": json.RawMessage(attResp)})
+	rec = doProject(t, av, id, http.MethodPost, "/api/aviary/passkey/register/finish", token, finishBody)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("register/finish: status %d body %s", rec.Code, rec.Body.String())
+	}
+	var finish struct {
+		CredentialID string `json:"credentialId"`
+	}
+	mustJSON(t, rec.Body.Bytes(), &finish)
+	if finish.CredentialID == "" {
+		t.Fatal("register/finish returned empty credential id")
+	}
+	return finish.CredentialID
+}
+
+// TestPasskeyListAndDelete verifies a user can list and remove their own
+// passkeys, and cannot delete another user's passkey.
+func TestPasskeyListAndDelete(t *testing.T) {
+	av := newTestAviary(t)
+	ctx := context.Background()
+	if _, err := av.CreateProject(ctx, "alpha", "Alpha"); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	app := bootProject(t, av, "alpha")
+	_, token := createUser(t, app, "user@example.com", "password123")
+	_, otherToken := createUser(t, app, "other@example.com", "password123")
+
+	credID := registerPasskey(t, av, "alpha", token, "My Laptop")
+
+	// List shows exactly the one enrolled passkey, with no credential material.
+	rec := doProject(t, av, "alpha", http.MethodGet, "/api/aviary/passkey", token, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list: status %d body %s", rec.Code, rec.Body.String())
+	}
+	var list []struct {
+		CredentialID string `json:"credentialId"`
+		Label        string `json:"label"`
+		Created      string `json:"created"`
+	}
+	mustJSON(t, rec.Body.Bytes(), &list)
+	if len(list) != 1 || list[0].CredentialID != credID || list[0].Label != "My Laptop" {
+		t.Fatalf("unexpected list: %+v", list)
+	}
+	if list[0].Created == "" {
+		t.Error("expected a created timestamp")
+	}
+
+	// Listing requires authentication.
+	if rec := doProject(t, av, "alpha", http.MethodGet, "/api/aviary/passkey", "", nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("list without auth: status %d, want 401", rec.Code)
+	}
+
+	// A different user must not be able to delete this user's passkey.
+	if rec := doProject(t, av, "alpha", http.MethodDelete, "/api/aviary/passkey/"+credID, otherToken, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("cross-user delete: status %d, want 404", rec.Code)
+	}
+	// It must still be present for the owner.
+	rec = doProject(t, av, "alpha", http.MethodGet, "/api/aviary/passkey", token, nil)
+	mustJSON(t, rec.Body.Bytes(), &list)
+	if len(list) != 1 {
+		t.Fatalf("passkey should survive a foreign delete attempt, got %d", len(list))
+	}
+
+	// The owner deletes their passkey.
+	if rec := doProject(t, av, "alpha", http.MethodDelete, "/api/aviary/passkey/"+credID, token, nil); rec.Code != http.StatusOK {
+		t.Fatalf("owner delete: status %d body %s", rec.Code, rec.Body.String())
+	}
+	// Deleting again is a 404.
+	if rec := doProject(t, av, "alpha", http.MethodDelete, "/api/aviary/passkey/"+credID, token, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("delete missing: status %d, want 404", rec.Code)
+	}
+	// List is now empty.
+	rec = doProject(t, av, "alpha", http.MethodGet, "/api/aviary/passkey", token, nil)
+	mustJSON(t, rec.Body.Bytes(), &list)
+	if len(list) != 0 {
+		t.Fatalf("expected empty list after delete, got %+v", list)
+	}
+}
+
 func mustJSON(t *testing.T, data []byte, v any) {
 	t.Helper()
 	if err := json.Unmarshal(data, v); err != nil {
