@@ -2,6 +2,7 @@ package aviary
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +28,10 @@ var (
 	ErrNotFound  = controlplane.ErrNotFound
 	ErrExists    = controlplane.ErrExists
 	ErrInvalidID = controlplane.ErrInvalidID
+	// ErrReserved is returned by CreateProject when the requested id is a
+	// reserved control-plane label (e.g. "aviary-console" or "www") and so
+	// cannot be used for a tenant project.
+	ErrReserved = errors.New("aviary: project id is reserved")
 )
 
 // projectPath returns the data directory for the given project id.
@@ -38,8 +43,13 @@ func (a *Aviary) projectPath(id string) string {
 // control-plane store and creates its (empty) data directory. The project's
 // PocketBase app is booted lazily on first request, not here.
 //
-// Returns ErrInvalidID for a malformed id or ErrExists if it already exists.
+// Returns ErrInvalidID for a malformed id, ErrReserved if the id is a reserved
+// control-plane label, or ErrExists if it already exists.
 func (a *Aviary) CreateProject(ctx context.Context, id, name string) (*Project, error) {
+	if reserved[id] {
+		return nil, ErrReserved
+	}
+
 	p, err := a.store.Create(ctx, id, name)
 	if err != nil {
 		return nil, err

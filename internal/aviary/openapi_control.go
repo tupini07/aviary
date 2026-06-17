@@ -125,7 +125,7 @@ func controlOpenAPI(serverURL string) oa {
 				"requestBody": jsonBody(ref("CreateProject")),
 				"responses": oa{
 					"201": oa{"description": "Project created", "content": jsonBody(ref("Project"))["content"]},
-					"400": errResp("Invalid project id"),
+					"400": errResp("Invalid or reserved project id"),
 					"409": errResp("Project already exists"),
 				},
 			},
@@ -360,7 +360,7 @@ func controlOpenAPI(serverURL string) oa {
 				"CreateProject": oa{
 					"type": "object",
 					"properties": oa{
-						"id":   oa{"type": "string", "description": "Subdomain-safe id."},
+						"id":   oa{"type": "string", "description": "Subdomain-safe id (lower-case alphanumerics and hyphens, leading alnum, 1-40 chars). Reserved labels such as 'aviary-console' and 'www' are rejected.", "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"},
 						"name": oa{"type": "string"},
 					},
 					"required": []any{"id"},

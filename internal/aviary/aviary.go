@@ -69,10 +69,15 @@ type Aviary struct {
 }
 
 // reserved holds host labels that never map to a project and are instead
-// served by the control plane. "_console" is the canonical control-plane
-// subdomain (usable behind a reverse proxy on a real domain, e.g.
-// _console.apps.example.com); "www" and "_" are kept as conventional aliases.
-var reserved = map[string]bool{"_console": true, "www": true, "_": true}
+// served by the control plane. "aviary-console" is the canonical control-plane
+// subdomain: it is a valid DNS label (so it works behind a reverse proxy on a
+// real domain, e.g. aviary-console.apps.example.com) and is rejected as a
+// project id by CreateProject so it can never collide with a tenant. "www" is a
+// conventional alias (also reserved at creation). The underscore labels
+// "_console" and "_" are kept as legacy aliases for local/curl testing via an
+// explicit Host header; they are unreachable over real DNS (underscores are
+// invalid in hostnames) but cost nothing to keep.
+var reserved = map[string]bool{"aviary-console": true, "www": true, "_console": true, "_": true}
 
 // New creates an Aviary, opens its control-plane store and starts the
 // background idle-eviction reaper.

@@ -20,7 +20,8 @@ func TestProjectHostFromControl(t *testing.T) {
 		{"bare localhost", "localhost", "p1", "p1.localhost"},
 		{"localhost with port", "localhost:8090", "p1", "p1.localhost:8090"},
 		{"ipv4 falls back to localhost", "127.0.0.1:8090", "p1", "p1.localhost:8090"},
-		{"reserved console label", "_console.apps.example.com", "p1", "p1.apps.example.com"},
+		{"reserved console label", "aviary-console.apps.example.com", "p1", "p1.apps.example.com"},
+		{"legacy console label", "_console.apps.example.com", "p1", "p1.apps.example.com"},
 		{"reserved www label", "www.apps.example.com:443", "p1", "p1.apps.example.com:443"},
 	}
 	for _, tc := range cases {

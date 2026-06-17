@@ -70,6 +70,11 @@ func TestCreateProjectValidation(t *testing.T) {
 	if _, err := av.CreateProject(ctx, "dup", ""); !errors.Is(err, ErrExists) {
 		t.Fatalf("duplicate: got %v, want ErrExists", err)
 	}
+	for _, id := range []string{"aviary-console", "www", "_console", "_"} {
+		if _, err := av.CreateProject(ctx, id, ""); !errors.Is(err, ErrReserved) {
+			t.Fatalf("reserved id %q: got %v, want ErrReserved", id, err)
+		}
+	}
 }
 
 func TestDeleteProjectRemovesDirAndRecord(t *testing.T) {
@@ -118,7 +123,8 @@ func TestServeHTTPRoutingDecisions(t *testing.T) {
 		{"invalid id", "BAD_ID.localhost", http.StatusBadRequest},
 		{"disabled project", "disabled.localhost", http.StatusForbidden},
 		{"control plane landing", "localhost", http.StatusOK},
-		{"control plane via _console subdomain", "_console.apps.example.com", http.StatusOK},
+		{"control plane via aviary-console subdomain", "aviary-console.apps.example.com", http.StatusOK},
+		{"control plane via legacy _console subdomain", "_console.apps.example.com", http.StatusOK},
 		{"control plane via www subdomain", "www.apps.example.com", http.StatusOK},
 	}
 	for _, tc := range cases {

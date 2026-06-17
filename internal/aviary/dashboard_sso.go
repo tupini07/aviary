@@ -245,7 +245,7 @@ func projectHostFromControl(controlHost, id string) string {
 			// Bare host such as "localhost".
 			base = id + "." + hostname
 		case reserved[label]:
-			// Reserved control label (e.g. _console.apps.example.com) →
+			// Reserved control label (e.g. aviary-console.apps.example.com) →
 			// swap it for the project id.
 			base = id + "." + rest
 		default:

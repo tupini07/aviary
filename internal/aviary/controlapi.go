@@ -167,6 +167,8 @@ func (a *Aviary) apiCreateProject(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, ErrInvalidID):
 		a.apiError(w, http.StatusBadRequest, "invalid project id")
+	case errors.Is(err, ErrReserved):
+		a.apiError(w, http.StatusBadRequest, "project id is reserved")
 	case errors.Is(err, ErrExists):
 		a.apiError(w, http.StatusConflict, "project already exists")
 	case err != nil:

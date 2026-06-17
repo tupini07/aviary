@@ -133,8 +133,11 @@ new binary — the update replaces the file, it does not hot-reload the process.
 
 The control plane is served on the bare host (no project subdomain), e.g.
 `http://127.0.0.1:8090/`. Behind a reverse proxy on a real domain, reach it via
-the reserved **`_console`** subdomain (e.g. `_console.apps.example.com`); `www`
-and `_` are also reserved aliases. It ships a single-page web UI to:
+the reserved **`aviary-console`** subdomain (e.g. `aviary-console.apps.example.com`);
+`www` is also a reserved alias. Both are rejected as project ids so they can never
+collide with a tenant. (`_console` and `_` remain reserved as legacy aliases for
+local testing via an explicit `Host` header, but are unreachable over real DNS
+since underscores are invalid in hostnames.) It ships a single-page web UI to:
 
 * create / delete / disable / enable projects,
 * open any project's admin dashboard,

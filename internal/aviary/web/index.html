@@ -1159,7 +1159,7 @@ function projectOrigin(id) {
   const proto = location.protocol; // "http:" / "https:"
   const port = location.port ? ":" + location.port : "";
   const hostname = location.hostname;
-  const reserved = { _console: true, www: true, _: true };
+  const reserved = { "aviary-console": true, www: true, _console: true, _: true };
   const isIPv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
   let base;
   if (isIPv4 || hostname.includes(":")) {
