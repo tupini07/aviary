@@ -151,6 +151,18 @@
   .toggle span { color: var(--fg); }
   .files-title { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .files-title h1 { margin: 0; }
+  /* ---------- Per-project workspace sub-tabs ---------- */
+  .subnav { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 0 0 18px; }
+  .subtab { background: transparent; color: var(--muted); border: 0; border-bottom: 2px solid transparent;
+    border-radius: 0; padding: 9px 14px; font-size: 14px; font-weight: 500; margin-bottom: -1px; }
+  .subtab:hover { background: transparent; color: var(--fg); }
+  .subtab.current { color: var(--accent); border-bottom-color: var(--accent); }
+  .subview { display: none; }
+  .subview.active { display: block; }
+  .danger-zone { border-color: color-mix(in srgb, var(--danger), white 55%); }
+  .danger-zone h2 { color: var(--danger); }
+  .danger-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: space-between; }
+  .danger-row p { margin: 0; font-size: 13px; color: var(--muted); }
   .keys-list { list-style: none; margin: 0; padding: 0; }
   .keys-list li { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
   .keys-list li:first-child { border-top: 1px solid var(--border); }
@@ -271,72 +283,101 @@
       </div>
     </section>
 
-    <!-- Files editor view (opened per-project from the Projects table) -->
+    <!-- Per-project workspace (opened per-project from the Projects table) -->
     <section class="view" data-view="files">
       <div class="view-head">
         <button id="fvBack" class="ghost" style="margin-bottom:10px">← Back to projects</button>
         <div class="files-title">
-          <h1>Files <span class="muted" id="fvProject" style="font-weight:400"></span></h1>
+          <h1>Project <span class="muted" id="fvProject" style="font-weight:400"></span></h1>
           <a id="fvVisit" class="btnlink" target="_blank" rel="noopener">Visit site ↗</a>
         </div>
-        <p>Edit the static files served from this project's <code>pb_public</code> directory at its public URL.</p>
       </div>
-      <div class="card su-only" id="fvOptionsCard">
-        <label class="toggle">
-          <input type="checkbox" id="fvSpa" />
-          <span><strong>Single-page-app mode</strong> — serve <code>index.html</code> for any path that doesn't match a file, so client-side routers (React, Vue, SvelteKit…) own deep links. Toggling reboots the project.</span>
-        </label>
-        <div class="err" id="fvSpaErr"></div>
+
+      <div class="subnav" role="tablist">
+        <button type="button" class="subtab current" data-subview="fvFiles">Files</button>
+        <button type="button" class="subtab" data-subview="fvKeys">API keys</button>
+        <button type="button" class="subtab su-only" data-subview="fvSettings">Settings</button>
       </div>
-      <div class="card" id="fvKeysCard">
-        <h2 style="margin-top:0">API keys</h2>
-        <p class="muted" style="font-size:13px; margin-top:0">
-          Non-interactive credentials for agents or CI to publish files to this project via
-          <code>Authorization: Bearer &lt;token&gt;</code>. A key is scoped to this project only,
-          and its token is shown once — at creation.
-        </p>
-        <ul id="fvKeysList" class="keys-list"></ul>
-        <div class="empty hidden" id="fvKeysEmpty">No API keys yet.</div>
-        <div class="key-reveal hidden" id="fvKeyReveal">
-          <strong>Copy your new key now — it won't be shown again:</strong>
-          <div class="key-reveal-row">
-            <code id="fvKeyToken"></code>
-            <button id="fvKeyCopy" class="ghost" type="button">Copy</button>
-          </div>
-        </div>
-        <div class="row" style="margin-top:14px; align-items:flex-end">
-          <div><label for="fvKeyLabel">Label</label><input id="fvKeyLabel" placeholder="github-actions" /></div>
-          <div><label for="fvKeyDays">Expires in days <span class="muted">(optional)</span></label><input id="fvKeyDays" type="number" min="1" placeholder="never" /></div>
-          <div style="flex:0 0 auto"><button id="fvKeyCreate" class="secondary" type="button">Create key</button></div>
-        </div>
-        <div class="err" id="fvKeysErr"></div>
-      </div>
-      <div class="card">
-        <div class="files-layout">
-          <div class="files-aside">
-            <div class="files-aside-head"><strong>pb_public</strong></div>
-            <ul id="fvList" class="files-list"></ul>
-            <div class="empty hidden" id="fvEmpty">No files yet.</div>
-            <div class="row" style="margin-top:12px">
-              <div><input id="fvNewPath" placeholder="index.html" /></div>
-              <div style="flex:0 0 auto"><button id="fvNew" class="secondary">New</button></div>
-            </div>
-          </div>
-          <div class="files-main">
-            <div class="files-main-head">
-              <input id="fvPath" readonly placeholder="select or create a file" />
-              <div class="actions">
-                <button id="fvSave" disabled>Save</button>
-                <button id="fvDelete" class="danger" disabled>Delete</button>
+
+      <!-- Files sub-view -->
+      <div class="subview active" data-subview="fvFiles">
+        <div class="card">
+          <p class="muted" style="font-size:13px; margin:0 0 14px">Edit the static files served from this project's <code>pb_public</code> directory at its public URL.</p>
+          <div class="files-layout">
+            <div class="files-aside">
+              <div class="files-aside-head"><strong>pb_public</strong></div>
+              <ul id="fvList" class="files-list"></ul>
+              <div class="empty hidden" id="fvEmpty">No files yet.</div>
+              <div class="row" style="margin-top:12px">
+                <div><input id="fvNewPath" placeholder="index.html" /></div>
+                <div style="flex:0 0 auto"><button id="fvNew" class="secondary">New</button></div>
               </div>
             </div>
-            <textarea id="fvContent" spellcheck="false" placeholder="Select a file on the left, or create one to start editing." disabled></textarea>
-            <div class="err" id="fvErr"></div>
+            <div class="files-main">
+              <div class="files-main-head">
+                <input id="fvPath" readonly placeholder="select or create a file" />
+                <div class="actions">
+                  <button id="fvSave" disabled>Save</button>
+                  <button id="fvDelete" class="danger" disabled>Delete</button>
+                </div>
+              </div>
+              <textarea id="fvContent" spellcheck="false" placeholder="Select a file on the left, or create one to start editing." disabled></textarea>
+              <div class="err" id="fvErr"></div>
+            </div>
           </div>
+        </div>
+      </div>
+
+      <!-- API keys sub-view -->
+      <div class="subview" data-subview="fvKeys">
+        <div class="card" id="fvKeysCard">
+          <h2 style="margin-top:0">API keys</h2>
+          <p class="muted" style="font-size:13px; margin-top:0">
+            Non-interactive credentials for agents or CI to publish files to this project via
+            <code>Authorization: Bearer &lt;token&gt;</code>. A key is scoped to this project only,
+            and its token is shown once — at creation.
+          </p>
+          <ul id="fvKeysList" class="keys-list"></ul>
+          <div class="empty hidden" id="fvKeysEmpty">No API keys yet.</div>
+          <div class="key-reveal hidden" id="fvKeyReveal">
+            <strong>Copy your new key now — it won't be shown again:</strong>
+            <div class="key-reveal-row">
+              <code id="fvKeyToken"></code>
+              <button id="fvKeyCopy" class="ghost" type="button">Copy</button>
+            </div>
+          </div>
+          <div class="row" style="margin-top:14px; align-items:flex-end">
+            <div><label for="fvKeyLabel">Label</label><input id="fvKeyLabel" placeholder="github-actions" /></div>
+            <div><label for="fvKeyDays">Expires in days <span class="muted">(optional)</span></label><input id="fvKeyDays" type="number" min="1" placeholder="never" /></div>
+            <div style="flex:0 0 auto"><button id="fvKeyCreate" class="secondary" type="button">Create key</button></div>
+          </div>
+          <div class="err" id="fvKeysErr"></div>
+        </div>
+      </div>
+
+      <!-- Settings sub-view (superuser only) -->
+      <div class="subview su-only" data-subview="fvSettings">
+        <div class="card" id="fvOptionsCard">
+          <h2 style="margin-top:0">Serving</h2>
+          <label class="toggle">
+            <input type="checkbox" id="fvSpa" />
+            <span><strong>Single-page-app mode</strong> — serve <code>index.html</code> for any path that doesn't match a file, so client-side routers (React, Vue, SvelteKit…) own deep links. Toggling reboots the project.</span>
+          </label>
+          <div class="err" id="fvSpaErr"></div>
+        </div>
+        <div class="card danger-zone">
+          <h2 style="margin-top:0">Danger zone</h2>
+          <div class="danger-row">
+            <p>Permanently delete this project and all of its data. This cannot be undone.</p>
+            <button id="fvDelProject" class="danger" type="button">Delete project</button>
+          </div>
+          <div class="err" id="fvDelProjectErr"></div>
         </div>
       </div>
     </section>
 
+    <!-- Team view -->
+    <section class="view su-only" data-view="team">
       <div class="view-head">
         <h1>Team</h1>
         <p>Invite collaborators to administer a specific project — not the whole instance.</p>
@@ -881,6 +922,20 @@ for (const b of document.querySelectorAll(".sidebar .nav-item")) {
 // --- Files editor (per-project pb_public) ---
 let fvState = { id: null, name: "", current: null };
 
+// Switch between the per-project workspace sub-tabs (Files / API keys / Settings).
+function showFilesTab(name) {
+  const section = document.querySelector('.view[data-view="files"]');
+  for (const v of section.querySelectorAll(".subview")) {
+    v.classList.toggle("active", v.dataset.subview === name);
+  }
+  for (const t of section.querySelectorAll(".subtab")) {
+    t.classList.toggle("current", t.dataset.subview === name);
+  }
+}
+for (const t of document.querySelectorAll('.view[data-view="files"] .subtab')) {
+  t.addEventListener("click", () => showFilesTab(t.dataset.subview));
+}
+
 function fvSetError(msg) { $("fvErr").textContent = msg || ""; }
 
 // Mirror of projectHostFromControl (dashboard_sso.go): derive a project's public
@@ -916,6 +971,8 @@ function openFiles(p) {
   fvSetError("");
   $("fvKeyReveal").classList.add("hidden");
   $("fvKeysErr").textContent = "";
+  $("fvDelProjectErr").textContent = "";
+  showFilesTab("fvFiles");
   showView("files");
   loadFiles();
   loadKeys();
@@ -1069,6 +1126,14 @@ $("fvSpa").addEventListener("change", async (e) => {
     e.target.checked = !e.target.checked; // revert on failure
     $("fvSpaErr").textContent = (res.data && res.data.error) || "Failed to update SPA mode.";
   }
+});
+$("fvDelProject").addEventListener("click", async () => {
+  $("fvDelProjectErr").textContent = "";
+  if (!confirm(`Delete project "${fvState.id}"? This permanently removes its data.`)) return;
+  const res = await api("DELETE", `/api/projects/${fvState.id}`);
+  if (!res.ok) { $("fvDelProjectErr").textContent = (res.data && res.data.error) || "Failed to delete project."; return; }
+  showView("projects");
+  loadProjects();
 });
 
 refresh();
