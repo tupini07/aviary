@@ -167,6 +167,7 @@ curl -s -b cj -i http://127.0.0.1:8090/api/projects/alpha/dashboard
 | Method & path                     | Auth            | Purpose                          |
 | --------------------------------- | --------------- | -------------------------------- |
 | `GET /`                           | public          | Control-plane web UI             |
+| `GET /api/openapi.json`           | public          | OpenAPI 3.1 spec of this API     |
 | `GET /api/auth/session`           | public          | Current auth + setup state       |
 | `POST /api/auth/login`            | public          | Log in, set session cookie       |
 | `POST /api/auth/logout`           | public          | Clear session cookie             |
@@ -192,6 +193,35 @@ superuser-only.
 
 ² `PUT /api/superuser` is allowed unauthenticated **only** for first-run setup
 (while no superuser exists); afterwards it requires a session.
+
+### API documentation (OpenAPI 3.1)
+
+Aviary serves machine-readable OpenAPI 3.1 specs so tools — and AI agents — can
+discover the API without external docs. They are generated/served as JSON, no
+build step required:
+
+- **Control plane:** `GET /api/openapi.json` on the control host. A small,
+  hand-authored document describing project management, auth, collaborators and
+  invitations.
+- **Per project:** `GET /__aviary/openapi.json` on each project's subdomain
+  (e.g. `https://alpha.example.com/__aviary/openapi.json`). Generated **on the
+  fly** by reflecting over that project's current PocketBase collections, so it
+  always matches the live schema. It documents the records CRUD endpoints (with
+  a JSON Schema per collection) plus the auth and Aviary passkey endpoints.
+  Internal/system collections (the `_`-prefixed namespace, including Aviary's
+  `_passkeys` store) are excluded.
+
+```bash
+# control-plane API spec
+curl -s http://127.0.0.1:8090/api/openapi.json | jq .info
+
+# a project's live API spec (records + auth, derived from its collections)
+curl -s http://alpha.localhost:8090/__aviary/openapi.json | jq '.paths | keys'
+```
+
+Realtime, batch, file-token and OAuth2 endpoints are part of PocketBase but are
+not enumerated in the per-project spec; see <https://pocketbase.io/docs/> for
+the full PocketBase reference.
 
 ### Passkeys (WebAuthn)
 
@@ -247,6 +277,7 @@ control-plane SSO handoff to sign in.
 | `internal/aviary/superuser_propagation.go` | Propagate superuser into each project    |
 | `internal/aviary/superuser_passkey.go` | Superuser WebAuthn ceremonies (control plane) |
 | `internal/aviary/dashboard_sso.go`  | One-click dashboard SSO (ticket → minted token) |
+| `internal/aviary/openapi.go` + `openapi_control.go` + `openapi_project.go` | OpenAPI 3.1 specs (control plane + on-the-fly per project) |
 | `internal/aviary/collaborators.go` + `collaborator_api.go` | Invitations + project-scoped collaborators |
 | `internal/aviary/ui.go` + `web/`    | Embedded control-plane web UI                   |
 | `internal/aviary/cage.go`           | One isolated PocketBase project (lifecycle)     |
@@ -267,4 +298,5 @@ control-plane SSO handoff to sign in.
 - [x] Env-var configuration + headless superuser bootstrap
 - [x] Invitation flow with project-scoped collaborators
 - [x] One-click dashboard SSO + disabled PocketBase password login (no brute-force surface)
+- [x] Auto-generated OpenAPI 3.1 specs (control plane + on-the-fly per project)
 - [ ] Per-project quotas and metrics

@@ -55,6 +55,9 @@ func (a *Aviary) controlHandler() http.Handler {
 	// Catch-all GET serves the landing page.
 	mux.HandleFunc("GET /", a.landing)
 
+	// Machine-readable OpenAPI description of this control-plane API.
+	mux.HandleFunc("GET /api/openapi.json", a.apiControlOpenAPI)
+
 	return mux
 }
 

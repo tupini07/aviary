@@ -166,6 +166,12 @@ func (a *Aviary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Serve a generated OpenAPI description of this project's PocketBase API.
+	if r.URL.Path == openapiPath {
+		a.handleProjectOpenAPI(w, r, id, c)
+		return
+	}
+
 	c.handler.ServeHTTP(w, r)
 }
 
