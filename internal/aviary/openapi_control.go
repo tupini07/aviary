@@ -169,6 +169,19 @@ func controlOpenAPI(serverURL string) oa {
 				"responses":   oa{"302": oa{"description": "Redirect to the project SSO handoff (or to the login page when unauthenticated in a browser)"}, "401": errResp("Authentication required"), "403": errResp("No dashboard access to this project")},
 			},
 		},
+		"/api/projects/{id}/admin-token": oa{
+			"post": oa{
+				"tags": []any{"projects"}, "summary": "Mint a PocketBase superuser token for the project",
+				"description": "Returns a short-lived PocketBase superuser auth token for the project's PocketBase API, the programmatic equivalent of dashboard SSO. Lets migrations, seed scripts and CI drive the project as a superuser without enabling native password login. Accepts a session cookie or a project-scoped API key (key callers receive a token for the federated control-plane superuser). Use the returned `token` as a Bearer against `apiURL` (the project's PocketBase origin).",
+				"parameters":  []any{idParam},
+				"responses": oa{
+					"200": oa{"description": "Minted superuser token", "content": jsonBody(ref("AdminToken"))["content"]},
+					"401": errResp("Authentication required"),
+					"403": errResp("No access to this project"),
+					"404": errResp("Project not found"),
+				},
+			},
+		},
 		"/api/projects/{id}/files": oa{
 			"get": oa{
 				"tags": []any{"files"}, "summary": "List static files served from the project's pb_public directory",
@@ -403,6 +416,15 @@ func controlOpenAPI(serverURL string) oa {
 						"passwordLoginDisabled": oa{"type": "boolean", "description": "When true, the superuser can only sign in with a passkey."},
 					},
 					"required": []any{"passwordLoginDisabled"},
+				},
+				"AdminToken": oa{
+					"type": "object",
+					"properties": oa{
+						"token":          oa{"type": "string", "description": "PocketBase superuser auth token; send as 'Authorization: Bearer <token>' to the project's PocketBase API."},
+						"superuserEmail": oa{"type": "string", "format": "email", "description": "The _superusers account the token was minted for."},
+						"apiURL":         oa{"type": "string", "description": "Origin (scheme://host) of the project's PocketBase API the token authenticates against."},
+						"issued":         oa{"type": "string", "format": "date-time"},
+					},
 				},
 				"Collaborator": oa{
 					"type": "object",

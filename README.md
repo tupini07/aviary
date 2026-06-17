@@ -176,6 +176,35 @@ brute-force, and the only way in is an Aviary-minted token. Set
 native password login if you need it; doing so also leaves the `/_/` login page
 ungated so you can use it.
 
+**Automation & migrations.** Scripts that need to drive a project's PocketBase
+API as a superuser (migrations, seed scripts, CI) can't use password auth, since
+it's disabled. Instead mint a short-lived PocketBase superuser token from the
+control plane and use it as a Bearer token — the programmatic equivalent of
+dashboard SSO. It accepts a session cookie **or a project-scoped API key**, so
+automation never needs your interactive credentials:
+
+```sh
+# mint a PocketBase superuser token for project "alpha" (here via an API key)
+resp=$(curl -s -X POST https://aviary-console.example.com/api/projects/alpha/admin-token \
+  -H "Authorization: Bearer av_…yourkey…")
+token=$(echo "$resp" | jq -r .token)
+apiurl=$(echo "$resp" | jq -r .apiURL)   # → https://alpha.example.com
+
+# now hit the project's PocketBase API as a superuser
+curl -s "$apiurl/api/collections" -H "Authorization: Bearer $token"
+```
+
+In a PocketBase JS client, skip `authWithPassword` and load the token directly:
+
+```js
+const r = await fetch(`${CONSOLE}/api/projects/alpha/admin-token`, {
+  method: 'POST', headers: { Authorization: `Bearer ${API_KEY}` },
+});
+const { token, apiURL } = await r.json();
+const pb = new PocketBase(apiURL);
+pb.authStore.save(token, null);   // authenticated as superuser; no password needed
+```
+
 ```sh
 # first-run setup (only allowed while no superuser exists)
 curl -s -X PUT http://127.0.0.1:8090/api/superuser \
@@ -207,6 +236,7 @@ curl -s -b cj -i http://127.0.0.1:8090/api/projects/alpha/dashboard
 | `POST /api/projects`              | superuser       | Create a project                 |
 | `GET /api/projects/{id}`          | any¹            | Get a project                    |
 | `GET /api/projects/{id}/dashboard`| any¹            | SSO into the project dashboard   |
+| `POST /api/projects/{id}/admin-token`| any¹         | Mint a PocketBase superuser token (Bearer) for automation |
 | `PATCH /api/projects/{id}`        | superuser       | Enable/disable/rename/SPA-toggle a project |
 | `DELETE /api/projects/{id}`       | superuser       | Delete a project + its data      |
 | `GET /api/projects/{id}/files`    | any¹            | List the project's pb_public files |

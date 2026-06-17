@@ -44,6 +44,12 @@ func (a *Aviary) controlHandler() http.Handler {
 	// unauthenticated browser is sent to the login page rather than a JSON 401.
 	mux.HandleFunc("GET /api/projects/{id}/dashboard", a.apiDashboardSSO)
 
+	// Programmatic equivalent of dashboard SSO: mint a short-lived PocketBase
+	// superuser token for the project (no native password login required), for
+	// migrations, seed scripts and CI. Auth is enforced inside the handler so a
+	// project-scoped API key is accepted alongside interactive sessions.
+	mux.HandleFunc("POST /api/projects/{id}/admin-token", a.apiProjectAdminToken)
+
 	// Static file editor for each project's pb_public directory. Available to
 	// superusers and to collaborators granted the project.
 	mux.HandleFunc("GET /api/projects/{id}/files", a.requireAuth(a.apiListFiles))
