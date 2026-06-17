@@ -13,19 +13,27 @@ import (
 	"time"
 )
 
-func newTestAviary(t *testing.T) *Aviary {
+func newTestAviary(t *testing.T, opts ...func(*Config)) *Aviary {
 	t.Helper()
-	av, err := New(Config{
+	cfg := Config{
 		DataDir: t.TempDir(),
 		IdleTTL: time.Minute,
 		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
-	})
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	av, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(av.Shutdown)
 	return av
 }
+
+// withDashboardPassword enables PocketBase native superuser password login on
+// projects, for tests that exercise the propagated-credential path directly.
+func withDashboardPassword(c *Config) { c.AllowDashboardPassword = true }
 
 func TestCreateProjectMakesDirAndRecord(t *testing.T) {
 	av := newTestAviary(t)
@@ -110,6 +118,8 @@ func TestServeHTTPRoutingDecisions(t *testing.T) {
 		{"invalid id", "BAD_ID.localhost", http.StatusBadRequest},
 		{"disabled project", "disabled.localhost", http.StatusForbidden},
 		{"control plane landing", "localhost", http.StatusOK},
+		{"control plane via _console subdomain", "_console.apps.example.com", http.StatusOK},
+		{"control plane via www subdomain", "www.apps.example.com", http.StatusOK},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

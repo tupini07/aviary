@@ -10,23 +10,37 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tupini07/aviary/internal/aviary"
 )
 
+// version is the Aviary build version. It is overridden at build time via
+// -ldflags "-X main.version=...", e.g. by GoReleaser during a release.
+var version = "(untracked)"
+
 func main() {
-	addr := flag.String("addr", "127.0.0.1:8090", "address for the Aviary front server")
-	dataDir := flag.String("data", "./data", "parent dir holding control.db and projects/")
-	idleTTL := flag.Duration("idle-ttl", 5*time.Minute, "evict a project's app after this much inactivity")
-	seed := flag.String("seed", "", "comma-separated project ids to auto-provision on startup (dev convenience)")
+	addr := flag.String("addr", envOr("AVIARY_ADDR", "127.0.0.1:8090"), "address for the Aviary front server")
+	dataDir := flag.String("data", envOr("AVIARY_DATA", "./data"), "parent dir holding control.db and projects/")
+	idleTTL := flag.Duration("idle-ttl", envDuration("AVIARY_IDLE_TTL", 5*time.Minute), "evict a project's app after this much inactivity")
+	seed := flag.String("seed", envOr("AVIARY_SEED", ""), "comma-separated project ids to auto-provision on startup (dev convenience)")
+	allowPBPassword := flag.Bool("allow-dashboard-password", envBool("AVIARY_PB_PASSWORD_LOGIN", false), "keep PocketBase native superuser password login enabled on projects (default: only Aviary-minted token / SSO)")
+	showVersion := flag.Bool("version", false, "print the Aviary version and exit")
 	flag.Parse()
 
+	if *showVersion {
+		log.Printf("aviary %s", version)
+		return
+	}
+
 	av, err := aviary.New(aviary.Config{
-		DataDir: *dataDir,
-		IdleTTL: *idleTTL,
-		Logger:  slog.Default(),
+		DataDir:                *dataDir,
+		IdleTTL:                *idleTTL,
+		Logger:                 slog.Default(),
+		AllowDashboardPassword: *allowPBPassword,
 	})
 	if err != nil {
 		log.Fatalf("aviary: init: %v", err)
@@ -34,8 +48,9 @@ func main() {
 	defer av.Shutdown()
 
 	seedProjects(av, *seed)
+	bootstrapSuperuser(av)
 
-	slog.Info("Aviary up", "addr", *addr, "data", *dataDir, "idleTTL", idleTTL.String())
+	slog.Info("Aviary up", "version", version, "addr", *addr, "data", *dataDir, "idleTTL", idleTTL.String())
 	slog.Info("control plane", "cmd", "curl -s http://"+*addr+"/")
 
 	srv := &http.Server{
@@ -66,4 +81,69 @@ func seedProjects(av *aviary.Aviary, seed string) {
 			slog.Warn("failed to seed project", "project", id, "error", err)
 		}
 	}
+}
+
+// bootstrapSuperuser creates the control-plane superuser from environment
+// variables when AVIARY_SUPERUSER_EMAIL and AVIARY_SUPERUSER_PASSWORD are set
+// and no superuser exists yet. This enables fully headless, first-run
+// provisioning (e.g. in containers) without using the web setup flow.
+func bootstrapSuperuser(av *aviary.Aviary) {
+	email := strings.TrimSpace(os.Getenv("AVIARY_SUPERUSER_EMAIL"))
+	password := os.Getenv("AVIARY_SUPERUSER_PASSWORD")
+	if email == "" || password == "" {
+		return
+	}
+	ctx := context.Background()
+	has, err := av.HasSuperuser(ctx)
+	if err != nil {
+		slog.Warn("could not check for existing superuser", "error", err)
+		return
+	}
+	if has {
+		return // never overwrite an existing superuser from env
+	}
+	if err := av.SetSuperuser(ctx, email, password); err != nil {
+		slog.Warn("failed to bootstrap superuser from env", "error", err)
+		return
+	}
+	slog.Info("bootstrapped control-plane superuser from environment", "email", email)
+}
+
+// envOr returns the value of the named environment variable, or def if it is
+// unset or empty.
+func envOr(name, def string) string {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		return v
+	}
+	return def
+}
+
+// envBool parses the named environment variable as a boolean, falling back to
+// def if it is unset or invalid.
+func envBool(name string, def bool) bool {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		slog.Warn("invalid bool in environment variable; using default", "var", name, "value", v, "default", def)
+		return def
+	}
+	return b
+}
+
+// envDuration parses the named environment variable as a duration, falling back
+// to def if it is unset or invalid.
+func envDuration(name string, def time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		slog.Warn("invalid duration in environment variable; using default", "var", name, "value", v, "default", def.String())
+		return def
+	}
+	return d
 }

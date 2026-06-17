@@ -77,6 +77,12 @@ func (a *Aviary) SetProjectStatus(ctx context.Context, id string, status Status)
 	return nil
 }
 
+// SetProjectName updates a project's display name. Returns ErrNotFound if the
+// project does not exist.
+func (a *Aviary) SetProjectName(ctx context.Context, id, name string) error {
+	return a.store.SetName(ctx, id, name)
+}
+
 // DeleteProject stops the project's app (if running), removes its registry
 // entry and deletes its data directory. Returns ErrNotFound if it does not
 // exist.

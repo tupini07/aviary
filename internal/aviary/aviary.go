@@ -10,6 +10,7 @@
 package aviary
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -37,6 +38,12 @@ type Config struct {
 
 	// Logger is used for control-plane logging. Defaults to slog.Default().
 	Logger *slog.Logger
+
+	// AllowDashboardPassword keeps PocketBase's native superuser password login
+	// enabled on each project. By default it is disabled: the only way into a
+	// project dashboard is an Aviary-minted token (see dashboard SSO), which
+	// removes the password brute-force surface entirely.
+	AllowDashboardPassword bool
 }
 
 // Aviary is the multi-tenant registry and HTTP front. It implements
@@ -46,16 +53,26 @@ type Aviary struct {
 	log         *slog.Logger
 	store       *controlplane.Store
 	projectsDir string
+	control     http.Handler
 
 	mu    sync.Mutex
 	cages map[string]*cage
+
+	sessionKey []byte
+	loginLimit *loginRateLimiter
+
+	suPasskeySessions *suSessionStore
+	ssoTickets        *ticketStore
 
 	quit chan struct{}
 	wg   sync.WaitGroup
 }
 
-// reserved holds host labels that never map to a project.
-var reserved = map[string]bool{"www": true, "_": true}
+// reserved holds host labels that never map to a project and are instead
+// served by the control plane. "_console" is the canonical control-plane
+// subdomain (usable behind a reverse proxy on a real domain, e.g.
+// _console.apps.example.com); "www" and "_" are kept as conventional aliases.
+var reserved = map[string]bool{"_console": true, "www": true, "_": true}
 
 // New creates an Aviary, opens its control-plane store and starts the
 // background idle-eviction reaper.
@@ -80,14 +97,26 @@ func New(cfg Config) (*Aviary, error) {
 		return nil, err
 	}
 
+	// Session-signing key. Persisted in the control store so login sessions
+	// survive process restarts.
+	sessionKey, err := store.SessionKey(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
 	a := &Aviary{
 		cfg:         cfg,
 		log:         cfg.Logger,
 		store:       store,
 		projectsDir: projectsDir,
 		cages:       make(map[string]*cage),
+		sessionKey:  sessionKey,
+		loginLimit:  newLoginRateLimiter(10, time.Minute),
 		quit:        make(chan struct{}),
 	}
+	a.suPasskeySessions = newSUSessionStore()
+	a.ssoTickets = newTicketStore()
+	a.control = a.controlHandler()
 
 	a.wg.Add(1)
 	go a.reaper()
@@ -101,7 +130,7 @@ func New(cfg Config) (*Aviary, error) {
 func (a *Aviary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	id := projectID(r.Host)
 	if id == "" || reserved[id] {
-		a.landing(w, r)
+		a.control.ServeHTTP(w, r)
 		return
 	}
 	if !controlplane.ValidID(id) {
@@ -130,6 +159,13 @@ func (a *Aviary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Complete a dashboard single-sign-on handoff before handing the request to
+	// PocketBase. The cage is booted above, so its app is ready to mint a token.
+	if r.URL.Path == ssoPath {
+		a.handleProjectSSO(w, r, id, c)
+		return
+	}
+
 	c.handler.ServeHTTP(w, r)
 }
 
@@ -139,10 +175,21 @@ func (a *Aviary) getCage(id string) (*cage, error) {
 	a.mu.Lock()
 	c, ok := a.cages[id]
 	if !ok {
-		c = &cage{id: id, ready: make(chan struct{})}
+		c = &cage{id: id, ready: make(chan struct{}), allowDashboardPassword: a.cfg.AllowDashboardPassword}
 		a.cages[id] = c
 		go func() {
 			c.startErr = c.start(a.projectsDir, a.log)
+			if c.startErr == nil {
+				// Seed the control-plane superuser into the freshly-booted
+				// project so the same admin credentials unlock its dashboard.
+				if err := a.applySuperuserFromStore(context.Background(), c.app); err != nil {
+					a.log.Warn("failed to apply superuser on boot", "project", id, "error", err)
+				}
+				// Seed any project-scoped collaborators granted access.
+				if err := a.applyCollaboratorsOnBoot(context.Background(), id, c.app); err != nil {
+					a.log.Warn("failed to apply collaborators on boot", "project", id, "error", err)
+				}
+			}
 			close(c.ready)
 			if c.startErr != nil {
 				a.mu.Lock()
@@ -161,34 +208,32 @@ func (a *Aviary) getCage(id string) (*cage, error) {
 	return c, nil
 }
 
-// landing renders a minimal control-plane page listing the provisioned projects.
-func (a *Aviary) landing(w http.ResponseWriter, r *http.Request) {
-	projects, err := a.store.List(r.Context())
-	if err != nil {
-		a.log.Error("control-plane list failed", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
+// runningProjects returns the set of project ids whose app is currently booted
+// and ready to serve. Cages that are still booting or that failed to start are
+// excluded.
+func (a *Aviary) runningProjects() map[string]bool {
 	a.mu.Lock()
-	running := make(map[string]bool, len(a.cages))
-	for id := range a.cages {
-		running[id] = true
+	cages := make([]*cage, 0, len(a.cages))
+	for _, c := range a.cages {
+		cages = append(cages, c)
 	}
 	a.mu.Unlock()
 
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	fmt.Fprintf(w, "Aviary control plane\n\nProjects (%d):\n", len(projects))
-	for _, p := range projects {
-		state := "stopped"
-		if running[p.ID] {
-			state = "running"
+	running := make(map[string]bool, len(cages))
+	for _, c := range cages {
+		select {
+		case <-c.ready:
+			if c.startErr == nil {
+				running[c.id] = true
+			}
+		default:
+			// Still booting; report as not-yet-running rather than block.
 		}
-		fmt.Fprintf(w, "  - %-20s %-8s %s\n", p.ID, p.Status, state)
 	}
-	fmt.Fprintln(w, "\nReach a project via its subdomain, e.g. Host: alpha.localhost")
+	return running
 }
 
+// landing renders a minimal control-plane page listing the provisioned projects.
 // reaper periodically evicts idle projects until Shutdown is called.
 func (a *Aviary) reaper() {
 	defer a.wg.Done()

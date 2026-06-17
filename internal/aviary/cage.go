@@ -8,7 +8,10 @@ import (
 	"time"
 
 	"github.com/pocketbase/pocketbase"
+	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
+
+	"github.com/tupini07/aviary/internal/passkey"
 )
 
 // cage is a single isolated PocketBase project running inside the Aviary.
@@ -16,6 +19,11 @@ type cage struct {
 	id      string
 	app     *pocketbase.PocketBase
 	handler http.Handler
+
+	// allowDashboardPassword keeps PocketBase's native superuser password login
+	// enabled. When false (the default), password auth is rejected so the only
+	// way into the dashboard is an Aviary-minted token.
+	allowDashboardPassword bool
 
 	ready    chan struct{} // closed once start() has finished (success or failure)
 	startErr error
@@ -37,6 +45,23 @@ func (c *cage) start(projectsDir string, log *slog.Logger) error {
 
 	if err := app.Bootstrap(); err != nil {
 		return err
+	}
+
+	// Register passkey/WebAuthn endpoints before the handler is built, so the
+	// OnServe hook fires during buildHandler.
+	if err := passkey.Setup(app); err != nil {
+		_ = app.ResetBootstrapState()
+		return err
+	}
+
+	// Unless explicitly allowed, reject PocketBase's native superuser password
+	// login so the dashboard is reachable only via an Aviary-minted token. This
+	// eliminates the password brute-force surface on every project.
+	if !c.allowDashboardPassword {
+		app.OnRecordAuthWithPasswordRequest(core.CollectionNameSuperusers).BindFunc(
+			func(e *core.RecordAuthWithPasswordRequestEvent) error {
+				return apis.NewForbiddenError("password login is disabled; open the dashboard from the Aviary control plane", nil)
+			})
 	}
 
 	handler, err := buildHandler(app)

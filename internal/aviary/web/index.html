@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Aviary — Control Plane</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #181b22; --panel2: #1f232c; --border: #2a2f3a;
+    --fg: #e6e9ef; --muted: #9aa3b2; --accent: #5b8cff; --danger: #ff5b6e;
+    --ok: #34d399; --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
+  header .who { color: var(--muted); font-size: 13px; }
+  main { max-width: 880px; margin: 0 auto; padding: 24px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px; margin-bottom: 20px;
+  }
+  .card h2 { margin: 0 0 14px; font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  input {
+    width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel2); color: var(--fg); font-size: 14px;
+  }
+  select {
+    width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel2); color: var(--fg); font-size: 14px;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row > div { flex: 1; min-width: 160px; }
+  button {
+    cursor: pointer; border: 0; border-radius: 8px; padding: 9px 16px;
+    font-size: 14px; font-weight: 600; color: #fff; background: var(--accent);
+  }
+  button.secondary { background: var(--panel2); border: 1px solid var(--border); color: var(--fg); }
+  button.danger { background: var(--danger); }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 14px; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill.active { background: rgba(52,211,153,.15); color: var(--ok); }
+  .pill.disabled { background: rgba(251,191,36,.15); color: var(--warn); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .actions button, .actions a { padding: 5px 10px; font-size: 13px; }
+  a.btnlink { text-decoration: none; display: inline-block; border-radius: 8px; font-weight: 600;
+    background: var(--panel2); border: 1px solid var(--border); color: var(--fg); }
+  .muted { color: var(--muted); }
+  .err { color: var(--danger); font-size: 13px; min-height: 18px; margin-top: 8px; }
+  .hidden { display: none !important; }
+  .center { max-width: 380px; margin: 8vh auto; }
+  .stack > * + * { margin-top: 12px; }
+  .empty { color: var(--muted); text-align: center; padding: 24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🪺 Aviary <span class="muted" style="font-weight:400">control plane</span></h1>
+  <div class="who hidden" id="whoami"></div>
+</header>
+
+<!-- Invitation accept view -->
+<main id="invite" class="hidden">
+  <div class="card center stack">
+    <h2>Accept your invitation</h2>
+    <p class="muted" id="invHint" style="font-size:13px; margin-top:0">
+      Set a password to join the project. If you already have a collaborator account, just confirm.
+    </p>
+    <div>
+      <label for="invPassword">Password</label>
+      <input id="invPassword" type="password" autocomplete="new-password" placeholder="at least 8 characters" />
+    </div>
+    <button id="invSubmit">Accept invitation</button>
+    <div class="err" id="invErr"></div>
+    <p class="muted" id="invDone" style="font-size:13px"></p>
+  </div>
+</main>
+
+<!-- Setup / login gate -->
+<main id="gate" class="hidden">
+  <div class="card center stack">
+    <h2 id="gateTitle">Sign in</h2>
+    <div>
+      <label for="gEmail">Email</label>
+      <input id="gEmail" type="email" autocomplete="username" />
+    </div>
+    <div>
+      <label for="gPassword">Password</label>
+      <input id="gPassword" type="password" autocomplete="current-password" />
+    </div>
+    <button id="gSubmit">Sign in</button>
+    <button id="gPasskey" class="secondary hidden" style="width:100%">🔑 Sign in with a passkey</button>
+    <div class="err" id="gErr"></div>
+    <p class="muted" id="gHint" style="font-size:13px"></p>
+  </div>
+</main>
+
+<!-- Authenticated app -->
+<main id="app" class="hidden">
+  <div class="card">
+    <h2>Projects</h2>
+    <div id="projWrap">
+      <table id="projTable" class="hidden">
+        <thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Runtime</th><th></th></tr></thead>
+        <tbody id="projBody"></tbody>
+      </table>
+      <div class="empty hidden" id="projEmpty">No projects yet. Create one below.</div>
+    </div>
+  </div>
+
+  <div class="card su-only">
+    <h2>New project</h2>
+    <div class="row">
+      <div><label for="npId">ID (subdomain)</label><input id="npId" placeholder="my-app" /></div>
+      <div><label for="npName">Name (optional)</label><input id="npName" placeholder="My App" /></div>
+      <div style="flex:0 0 auto; display:flex; align-items:flex-end"><button id="npCreate">Create</button></div>
+    </div>
+    <div class="err" id="npErr"></div>
+  </div>
+
+  <div class="card su-only">
+    <h2>Superuser</h2>
+    <p class="muted" style="font-size:13px; margin-top:0">
+      These credentials are propagated to every project, so the same login unlocks every project dashboard.
+    </p>
+    <div class="row">
+      <div><label for="suEmail">Email</label><input id="suEmail" type="email" /></div>
+      <div><label for="suPassword">New password</label><input id="suPassword" type="password" placeholder="leave blank to keep email only" /></div>
+      <div style="flex:0 0 auto; display:flex; align-items:flex-end"><button id="suSave" class="secondary">Update</button></div>
+    </div>
+    <div class="err" id="suErr"></div>
+  </div>
+
+  <div class="card su-only">
+    <h2>Passkeys</h2>
+    <p class="muted" style="font-size:13px; margin-top:0">
+      Register a passkey to sign in to the control plane without a password.
+    </p>
+    <div id="pkWrap">
+      <table id="pkTable" class="hidden">
+        <thead><tr><th>Label</th><th>Added</th><th></th></tr></thead>
+        <tbody id="pkBody"></tbody>
+      </table>
+      <div class="empty hidden" id="pkEmpty">No passkeys registered yet.</div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <div><label for="pkLabel">Label (optional)</label><input id="pkLabel" placeholder="My Laptop" /></div>
+      <div style="flex:0 0 auto; display:flex; align-items:flex-end"><button id="pkAdd" class="secondary">Register a passkey</button></div>
+    </div>
+    <div class="err" id="pkErr"></div>
+  </div>
+
+  <div class="card su-only">
+    <h2>Collaborators &amp; invitations</h2>
+    <p class="muted" style="font-size:13px; margin-top:0">
+      Invite collaborators to administer a specific project. Accepting an invite
+      grants them dashboard access to that project only — not the whole instance.
+    </p>
+    <div class="row">
+      <div><label for="invEmail">Invitee email</label><input id="invEmail" type="email" placeholder="dev@example.com" /></div>
+      <div>
+        <label for="invProject">Project</label>
+        <select id="invProject"></select>
+      </div>
+      <div style="flex:0 0 auto; display:flex; align-items:flex-end"><button id="invCreate" class="secondary">Invite</button></div>
+    </div>
+    <div class="err" id="invCreateErr"></div>
+    <div id="invLink" class="hidden" style="margin-top:6px">
+      <label>Share this link with the invitee</label>
+      <input id="invLinkInput" readonly />
+    </div>
+
+    <h2 style="margin-top:22px">Pending invitations</h2>
+    <table id="pendTable" class="hidden">
+      <thead><tr><th>Email</th><th>Project</th><th>Expires</th></tr></thead>
+      <tbody id="pendBody"></tbody>
+    </table>
+    <div class="empty hidden" id="pendEmpty">No pending invitations.</div>
+
+    <h2 style="margin-top:22px">Collaborators</h2>
+    <table id="collabTable" class="hidden">
+      <thead><tr><th>Email</th><th>Projects</th><th></th></tr></thead>
+      <tbody id="collabBody"></tbody>
+    </table>
+    <div class="empty hidden" id="collabEmpty">No collaborators yet.</div>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const api = async (method, path, body) => {
+  const opts = { method, headers: {} };
+  if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+  const res = await fetch(path, opts);
+  let data = null;
+  try { data = await res.json(); } catch (_) {}
+  return { ok: res.ok, status: res.status, data };
+};
+
+let state = { authenticated: false, configured: false, email: "" };
+
+// --- WebAuthn helpers (base64url <-> ArrayBuffer) ---
+const supportsWebAuthn = () =>
+  window.PublicKeyCredential && navigator.credentials && navigator.credentials.create;
+
+function b64urlToBuf(s) {
+  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = s.length % 4;
+  if (pad) s += "=".repeat(4 - pad);
+  const bin = atob(s);
+  const buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  return buf.buffer;
+}
+
+function bufToB64url(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Convert the server's creation options (base64url fields) into the binary
+// shapes navigator.credentials.create expects.
+function toCreateOptions(pk) {
+  pk.challenge = b64urlToBuf(pk.challenge);
+  pk.user.id = b64urlToBuf(pk.user.id);
+  if (pk.excludeCredentials) {
+    pk.excludeCredentials = pk.excludeCredentials.map((c) => ({ ...c, id: b64urlToBuf(c.id) }));
+  }
+  return pk;
+}
+
+function toRequestOptions(pk) {
+  pk.challenge = b64urlToBuf(pk.challenge);
+  if (pk.allowCredentials) {
+    pk.allowCredentials = pk.allowCredentials.map((c) => ({ ...c, id: b64urlToBuf(c.id) }));
+  }
+  return pk;
+}
+
+function attestationToJSON(cred) {
+  return {
+    id: cred.id,
+    rawId: bufToB64url(cred.rawId),
+    type: cred.type,
+    response: {
+      clientDataJSON: bufToB64url(cred.response.clientDataJSON),
+      attestationObject: bufToB64url(cred.response.attestationObject),
+    },
+  };
+}
+
+function assertionToJSON(cred) {
+  return {
+    id: cred.id,
+    rawId: bufToB64url(cred.rawId),
+    type: cred.type,
+    response: {
+      clientDataJSON: bufToB64url(cred.response.clientDataJSON),
+      authenticatorData: bufToB64url(cred.response.authenticatorData),
+      signature: bufToB64url(cred.response.signature),
+      userHandle: cred.response.userHandle ? bufToB64url(cred.response.userHandle) : null,
+    },
+  };
+}
+
+async function passkeyRegister(label) {
+  const begin = await api("POST", "/api/auth/passkey/register/begin");
+  if (!begin.ok) throw new Error(begin.data?.error || "Could not start registration.");
+  const publicKey = toCreateOptions(begin.data.publicKey);
+  const cred = await navigator.credentials.create({ publicKey });
+  const finish = await api("POST", "/api/auth/passkey/register/finish", {
+    token: begin.data.token, label, response: attestationToJSON(cred),
+  });
+  if (!finish.ok) throw new Error(finish.data?.error || "Could not finish registration.");
+}
+
+async function passkeyLogin() {
+  const begin = await api("POST", "/api/auth/passkey/login/begin");
+  if (!begin.ok) throw new Error(begin.data?.error || "Could not start sign-in.");
+  const publicKey = toRequestOptions(begin.data.publicKey);
+  const cred = await navigator.credentials.get({ publicKey });
+  const finish = await api("POST", "/api/auth/passkey/login/finish", {
+    token: begin.data.token, response: assertionToJSON(cred),
+  });
+  if (!finish.ok) throw new Error(finish.data?.error || "Passkey sign-in failed.");
+}
+
+async function refresh() {
+  const params = new URLSearchParams(location.search);
+  const inviteToken = params.get("token");
+  if (inviteToken) { showInvite(inviteToken); return; }
+  const { data } = await api("GET", "/api/auth/session");
+  state = data || state;
+  if (state.authenticated) { showApp(); } else { showGate(); }
+}
+
+let pendingInviteToken = "";
+
+function showInvite(token) {
+  pendingInviteToken = token;
+  $("gate").classList.add("hidden");
+  $("app").classList.add("hidden");
+  $("whoami").classList.add("hidden");
+  $("invite").classList.remove("hidden");
+}
+
+$("invSubmit").onclick = async () => {
+  $("invErr").textContent = "";
+  const password = $("invPassword").value;
+  const r = await api("POST", "/api/invitations/accept", { token: pendingInviteToken, password });
+  if (!r.ok) { $("invErr").textContent = r.data?.error || "Could not accept invitation."; return; }
+  $("invite").querySelector(".stack").innerHTML =
+    `<h2>You're in 🎉</h2><p class="muted">You now have access to project ` +
+    `<code>${r.data.projectId}</code>. <a href="${location.origin}/" class="btnlink" style="padding:8px 14px">Go to sign in</a></p>`;
+};
+
+function showGate() {
+  $("app").classList.add("hidden");
+  $("whoami").classList.add("hidden");
+  $("gate").classList.remove("hidden");
+  if (state.configured) {
+    $("gateTitle").textContent = "Sign in";
+    $("gSubmit").textContent = "Sign in";
+    $("gHint").textContent = "";
+    $("gPassword").setAttribute("autocomplete", "current-password");
+    $("gPasskey").classList.toggle("hidden", !supportsWebAuthn());
+  } else {
+    $("gateTitle").textContent = "Create the first superuser";
+    $("gSubmit").textContent = "Create superuser";
+    $("gHint").textContent = "No superuser exists yet. Set the platform admin credentials to get started.";
+    $("gPassword").setAttribute("autocomplete", "new-password");
+    $("gPasskey").classList.add("hidden");
+  }
+}
+
+async function showApp() {
+  $("gate").classList.add("hidden");
+  $("invite").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  const who = $("whoami");
+  who.classList.remove("hidden");
+  who.innerHTML = "";
+  const span = document.createElement("span");
+  const roleLabel = state.role === "collaborator" ? " (collaborator)" : "";
+  span.textContent = state.email + roleLabel + "  ";
+  const out = document.createElement("button");
+  out.className = "ghost"; out.textContent = "Sign out";
+  out.onclick = async () => { await api("POST", "/api/auth/logout"); location.href = location.origin + "/"; };
+  who.append(span, out);
+
+  // Superuser-only management cards are hidden for collaborators.
+  const isSuper = state.role !== "collaborator";
+  for (const el of document.querySelectorAll(".su-only")) {
+    el.classList.toggle("hidden", !isSuper);
+  }
+
+  if (isSuper) {
+    $("suEmail").value = state.email;
+    await loadPasskeys();
+    await loadCollaborationData();
+  }
+  await loadProjects();
+}
+
+async function loadCollaborationData() {
+  // Project picker for new invitations.
+  const { data: projects } = await api("GET", "/api/projects");
+  const sel = $("invProject");
+  sel.innerHTML = "";
+  for (const p of (Array.isArray(projects) ? projects : [])) {
+    const opt = document.createElement("option");
+    opt.value = p.id; opt.textContent = p.name ? `${p.name} (${p.id})` : p.id;
+    sel.append(opt);
+  }
+  await loadInvitations();
+  await loadCollaborators();
+}
+
+async function loadInvitations() {
+  const { data } = await api("GET", "/api/invitations");
+  const list = Array.isArray(data) ? data : [];
+  const body = $("pendBody");
+  body.innerHTML = "";
+  $("pendTable").classList.toggle("hidden", list.length === 0);
+  $("pendEmpty").classList.toggle("hidden", list.length !== 0);
+  for (const inv of list) {
+    const tr = document.createElement("tr");
+    const tdE = document.createElement("td"); tdE.textContent = inv.email;
+    const tdP = document.createElement("td"); tdP.innerHTML = `<code>${inv.projectId}</code>`;
+    const tdX = document.createElement("td"); tdX.className = "muted";
+    tdX.textContent = inv.expires ? new Date(inv.expires).toLocaleString() : "—";
+    tr.append(tdE, tdP, tdX);
+    body.append(tr);
+  }
+}
+
+async function loadCollaborators() {
+  const { data } = await api("GET", "/api/collaborators");
+  const list = Array.isArray(data) ? data : [];
+  const body = $("collabBody");
+  body.innerHTML = "";
+  $("collabTable").classList.toggle("hidden", list.length === 0);
+  $("collabEmpty").classList.toggle("hidden", list.length !== 0);
+  for (const c of list) {
+    const tr = document.createElement("tr");
+    const tdE = document.createElement("td"); tdE.textContent = c.email;
+    const tdP = document.createElement("td");
+    const projects = c.projects || [];
+    tdP.innerHTML = projects.length
+      ? projects.map((p) => `<code>${p}</code>`).join(" ")
+      : `<span class="muted">none</span>`;
+    const tdA = document.createElement("td");
+    const del = document.createElement("button");
+    del.className = "danger"; del.textContent = "Remove";
+    del.style.padding = "5px 10px"; del.style.fontSize = "13px";
+    del.onclick = async () => {
+      if (!confirm(`Remove collaborator ${c.email}? They lose access to all projects.`)) return;
+      await api("DELETE", `/api/collaborators/${encodeURIComponent(c.email)}`);
+      loadCollaborators();
+    };
+    tdA.append(del);
+    tr.append(tdE, tdP, tdA);
+    body.append(tr);
+  }
+}
+
+$("invCreate").onclick = async () => {
+  $("invCreateErr").style.color = ""; $("invCreateErr").textContent = "";
+  const email = $("invEmail").value.trim();
+  const projectId = $("invProject").value;
+  if (!email || !projectId) { $("invCreateErr").textContent = "Email and project are required."; return; }
+  const r = await api("POST", "/api/invitations", { email, projectId });
+  if (!r.ok) { $("invCreateErr").textContent = r.data?.error || "Could not create invitation."; return; }
+  $("invEmail").value = "";
+  $("invLink").classList.remove("hidden");
+  $("invLinkInput").value = r.data.acceptUrl;
+  $("invLinkInput").focus(); $("invLinkInput").select();
+  $("invCreateErr").style.color = "var(--ok)";
+  $("invCreateErr").textContent = "Invitation created — copy the link below.";
+  loadInvitations();
+  loadCollaborators();
+};
+
+async function loadPasskeys() {
+  $("pkAdd").disabled = !supportsWebAuthn();
+  const { data } = await api("GET", "/api/auth/passkey");
+  const list = Array.isArray(data) ? data : [];
+  const body = $("pkBody");
+  body.innerHTML = "";
+  $("pkTable").classList.toggle("hidden", list.length === 0);
+  $("pkEmpty").classList.toggle("hidden", list.length !== 0);
+  for (const pk of list) {
+    const tr = document.createElement("tr");
+    const tdLabel = document.createElement("td"); tdLabel.textContent = pk.label || "Passkey";
+    const tdCreated = document.createElement("td");
+    tdCreated.className = "muted";
+    tdCreated.textContent = pk.created ? new Date(pk.created).toLocaleString() : "—";
+    const tdAct = document.createElement("td");
+    const del = document.createElement("button");
+    del.className = "danger"; del.textContent = "Remove";
+    del.style.padding = "5px 10px"; del.style.fontSize = "13px";
+    del.onclick = async () => {
+      if (!confirm(`Remove passkey "${pk.label || "Passkey"}"?`)) return;
+      await api("DELETE", `/api/auth/passkey/${encodeURIComponent(pk.credentialId)}`);
+      loadPasskeys();
+    };
+    tdAct.append(del);
+    tr.append(tdLabel, tdCreated, tdAct);
+    body.append(tr);
+  }
+}
+
+async function loadProjects() {
+  const { data } = await api("GET", "/api/projects");
+  const list = Array.isArray(data) ? data : [];
+  const body = $("projBody");
+  body.innerHTML = "";
+  $("projTable").classList.toggle("hidden", list.length === 0);
+  $("projEmpty").classList.toggle("hidden", list.length !== 0);
+  for (const p of list) {
+    const isSuper = state.role !== "collaborator";
+    const tr = document.createElement("tr");
+
+    const tdId = document.createElement("td"); tdId.innerHTML = `<code>${p.id}</code>`;
+    const tdName = document.createElement("td");
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = p.name || "—";
+    tdName.append(nameSpan);
+    if (isSuper) {
+      const rename = document.createElement("button");
+      rename.className = "ghost"; rename.textContent = "✎";
+      rename.title = "Rename"; rename.style.marginLeft = "8px"; rename.style.padding = "2px 7px";
+      rename.onclick = async () => {
+        const next = prompt(`Rename project "${p.id}"`, p.name || "");
+        if (next === null) return;
+        await api("PATCH", `/api/projects/${p.id}`, { name: next });
+        loadProjects();
+      };
+      tdName.append(rename);
+    }
+    const tdStatus = document.createElement("td");
+    tdStatus.innerHTML = `<span class="pill ${p.status}">${p.status}</span>`;
+    const tdRun = document.createElement("td");
+    tdRun.innerHTML = p.running
+      ? `<span class="pill active">running</span>`
+      : `<span class="muted">stopped</span>`;
+
+    const tdAct = document.createElement("td");
+    const acts = document.createElement("div"); acts.className = "actions";
+
+    const open = document.createElement("a");
+    open.className = "btnlink"; open.textContent = "Dashboard";
+    open.href = `/api/projects/${p.id}/dashboard`; open.target = "_blank"; open.rel = "noopener";
+    if (p.status !== "active") { open.style.pointerEvents = "none"; open.style.opacity = ".5"; }
+    acts.append(open);
+
+    if (isSuper) {
+      const toggle = document.createElement("button");
+      toggle.className = "secondary";
+      toggle.textContent = p.status === "active" ? "Disable" : "Enable";
+      toggle.onclick = async () => {
+        const next = p.status === "active" ? "disabled" : "active";
+        await api("PATCH", `/api/projects/${p.id}`, { status: next });
+        loadProjects();
+      };
+
+      const del = document.createElement("button");
+      del.className = "danger"; del.textContent = "Delete";
+      del.onclick = async () => {
+        if (!confirm(`Delete project "${p.id}"? This permanently removes its data.`)) return;
+        await api("DELETE", `/api/projects/${p.id}`);
+        loadProjects();
+      };
+      acts.append(toggle, del);
+    }
+
+    tdAct.append(acts);
+    tr.append(tdId, tdName, tdStatus, tdRun, tdAct);
+    body.append(tr);
+  }
+}
+
+// --- gate submit (login or first-run setup) ---
+$("gSubmit").onclick = async () => {
+  $("gErr").textContent = "";
+  const email = $("gEmail").value.trim();
+  const password = $("gPassword").value;
+  if (!email || !password) { $("gErr").textContent = "Email and password are required."; return; }
+
+  if (!state.configured) {
+    const r = await api("PUT", "/api/superuser", { email, password });
+    if (!r.ok) { $("gErr").textContent = r.data?.error || "Failed to create superuser."; return; }
+  }
+  const r = await api("POST", "/api/auth/login", { email, password });
+  if (!r.ok) { $("gErr").textContent = r.data?.error || "Invalid credentials."; return; }
+  $("gPassword").value = "";
+  refresh();
+};
+
+// --- gate passkey sign-in ---
+$("gPasskey").onclick = async () => {
+  $("gErr").textContent = "";
+  try {
+    await passkeyLogin();
+    refresh();
+  } catch (e) {
+    $("gErr").textContent = e.message || "Passkey sign-in failed.";
+  }
+};
+
+// --- register a passkey ---
+$("pkAdd").onclick = async () => {
+  $("pkErr").style.color = ""; $("pkErr").textContent = "";
+  if (!supportsWebAuthn()) { $("pkErr").textContent = "This browser does not support passkeys."; return; }
+  const label = $("pkLabel").value.trim();
+  $("pkAdd").disabled = true;
+  try {
+    await passkeyRegister(label);
+    $("pkLabel").value = "";
+    $("pkErr").style.color = "var(--ok)";
+    $("pkErr").textContent = "Passkey registered.";
+    setTimeout(() => { $("pkErr").style.color = ""; $("pkErr").textContent = ""; }, 3000);
+    loadPasskeys();
+  } catch (e) {
+    $("pkErr").textContent = e.message || "Could not register passkey.";
+  } finally {
+    $("pkAdd").disabled = false;
+  }
+};
+
+// --- create project ---
+$("npCreate").onclick = async () => {
+  $("npErr").textContent = "";
+  const id = $("npId").value.trim();
+  const name = $("npName").value.trim();
+  if (!id) { $("npErr").textContent = "Project ID is required."; return; }
+  const r = await api("POST", "/api/projects", { id, name });
+  if (!r.ok) { $("npErr").textContent = r.data?.error || "Failed to create project."; return; }
+  $("npId").value = ""; $("npName").value = "";
+  loadProjects();
+};
+
+// --- update superuser ---
+$("suSave").onclick = async () => {
+  $("suErr").textContent = "";
+  const email = $("suEmail").value.trim();
+  const password = $("suPassword").value;
+  if (!password) { $("suErr").textContent = "Enter a new password to update the superuser."; return; }
+  const r = await api("PUT", "/api/superuser", { email, password });
+  if (!r.ok) { $("suErr").textContent = r.data?.error || "Failed to update superuser."; return; }
+  $("suPassword").value = "";
+  state.email = email;
+  $("suErr").style.color = "var(--ok)";
+  $("suErr").textContent = "Superuser updated and propagated to all projects.";
+  setTimeout(() => { $("suErr").style.color = ""; $("suErr").textContent = ""; }, 4000);
+};
+
+// Enter-to-submit on the gate.
+for (const el of [$("gEmail"), $("gPassword")]) {
+  el.addEventListener("keydown", (e) => { if (e.key === "Enter") $("gSubmit").click(); });
+}
+
+refresh();
+</script>
+</body>
+</html>
