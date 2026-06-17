@@ -89,7 +89,6 @@ func printHeader(out io.Writer, version string) {
 	fmt.Fprintf(out, "  multi-tenant PocketBase control plane  •  %s\n\n", displayVersion(version))
 }
 
-
 // already exist. Intended only as a local-development convenience.
 func seedProjects(av *aviary.Aviary, seed string) {
 	for _, id := range strings.Split(seed, ",") {
