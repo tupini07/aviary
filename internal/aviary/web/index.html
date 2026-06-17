@@ -163,6 +163,35 @@
   .danger-zone h2 { color: var(--danger); }
   .danger-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: space-between; }
   .danger-row p { margin: 0; font-size: 13px; color: var(--muted); }
+  /* ---------- API docs ---------- */
+  .docs-tag { margin-top: 22px; }
+  .docs-tag:first-child { margin-top: 6px; }
+  .docs-tag-head { font-size: 13px; font-weight: 600; color: var(--fg); margin-bottom: 2px; }
+  .docs-tag-desc { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .docs-op { border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; overflow: hidden; }
+  .docs-op > summary { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer;
+    list-style: none; font-size: 13px; }
+  .docs-op > summary::-webkit-details-marker { display: none; }
+  .docs-op > summary:hover { background: var(--panel2); }
+  .docs-op[open] > summary { border-bottom: 1px solid var(--border); background: var(--panel2); }
+  .docs-op .m { font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 700; font-size: 11px;
+    letter-spacing: .4px; padding: 2px 7px; border-radius: 4px; color: #fff; flex: 0 0 auto; min-width: 54px; text-align: center; }
+  .docs-op .m.get { background: #3376e5; }
+  .docs-op .m.post { background: #198754; }
+  .docs-op .m.put { background: #b85e22; }
+  .docs-op .m.patch { background: #7048c4; }
+  .docs-op .m.delete { background: var(--danger); }
+  .docs-op .p { font-family: "IBM Plex Mono", ui-monospace, monospace; color: var(--fg); }
+  .docs-op .s { color: var(--muted); flex: 1; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .docs-op .body { padding: 12px 14px; font-size: 13px; display: flex; flex-direction: column; gap: 12px; }
+  .docs-op .body p { margin: 0; color: var(--fg); }
+  .docs-op .body h4 { margin: 0 0 5px; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+  .docs-op .body ul { margin: 0; padding-left: 18px; }
+  .docs-op .body li { margin: 2px 0; }
+  .docs-op .body code { font-family: "IBM Plex Mono", ui-monospace, monospace; background: var(--panel2);
+    padding: 1px 5px; border-radius: 4px; }
+  .docs-auth { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
+    background: var(--panel2); border: 1px solid var(--border); color: var(--muted); }
   .keys-list { list-style: none; margin: 0; padding: 0; }
   .keys-list li { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
   .keys-list li:first-child { border-top: 1px solid var(--border); }
@@ -246,6 +275,7 @@
     </div>
     <nav class="nav">
       <button type="button" class="nav-item current" data-view="projects"><span class="ico">▦</span> Projects</button>
+      <button type="button" class="nav-item" data-view="docs"><span class="ico">◫</span> Docs</button>
       <button type="button" class="nav-item su-only" data-view="team"><span class="ico">＋</span> Team</button>
       <button type="button" class="nav-item su-only" data-view="settings"><span class="ico">⚙</span> Settings</button>
     </nav>
@@ -457,6 +487,42 @@
           <div style="flex:0 0 auto"><button id="pkAdd" class="secondary">Register a passkey</button></div>
         </div>
         <div class="err" id="pkErr"></div>
+      </div>
+    </section>
+
+    <!-- Docs view (API reference rendered from the OpenAPI spec) -->
+    <section class="view" data-view="docs">
+      <div class="view-head">
+        <h1>API docs</h1>
+        <p>The full API surface — Aviary's control plane plus each project's PocketBase API — described by machine-readable OpenAPI 3.1 specs.</p>
+      </div>
+
+      <div class="card">
+        <h2>Specifications</h2>
+        <div class="row" style="align-items:flex-end">
+          <div style="flex:1 1 260px">
+            <label>Control plane</label>
+            <a class="btnlink" href="/api/openapi.json" target="_blank" rel="noopener">Open <code>/api/openapi.json</code> ↗</a>
+          </div>
+          <div style="flex:1 1 260px">
+            <label for="docsProject">Project API (per cage)</label>
+            <div class="row" style="gap:8px">
+              <div style="flex:1"><select id="docsProject"></select></div>
+              <div style="flex:0 0 auto"><a id="docsProjectLink" class="btnlink" target="_blank" rel="noopener">Open ↗</a></div>
+            </div>
+          </div>
+        </div>
+        <p class="muted" style="font-size:13px; margin:12px 0 0">
+          Each project serves a generated spec at <code>/__aviary/openapi.json</code> on its own
+          subdomain. Specs are emitted as JSON with no build step, so tools and AI agents can
+          consume them directly.
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>Control-plane reference</h2>
+        <div id="docsErr" class="err"></div>
+        <div id="docsBody"></div>
       </div>
     </section>
   </div>
@@ -914,9 +980,136 @@ function showView(name) {
   for (const b of document.querySelectorAll(".sidebar .nav-item")) {
     b.classList.toggle("current", b.dataset.view === name);
   }
+  if (name === "docs") loadDocs();
 }
 for (const b of document.querySelectorAll(".sidebar .nav-item")) {
   b.addEventListener("click", () => showView(b.dataset.view));
+}
+
+// --- API docs (rendered from the control-plane OpenAPI spec) ---
+const PROJECT_OPENAPI_PATH = "/__aviary/openapi.json";
+let docsLoaded = false;
+
+const METHOD_ORDER = ["get", "post", "put", "patch", "delete"];
+const AUTH_LABELS = { cookieAuth: "session cookie", bearerAuth: "API key" };
+
+function authLabel(op, doc) {
+  // An explicit empty array means the endpoint is public; absent means it
+  // inherits the document-level security requirement.
+  const sec = op.security !== undefined ? op.security : doc.security;
+  if (Array.isArray(sec) && sec.length === 0) return "public";
+  const schemes = new Set();
+  for (const req of sec || []) for (const k of Object.keys(req)) schemes.add(AUTH_LABELS[k] || k);
+  return schemes.size ? [...schemes].join(" or ") : "public";
+}
+
+async function loadDocs() {
+  // Populate the per-project spec picker every time (projects may have changed).
+  const { data: projects } = await api("GET", "/api/projects");
+  const sel = $("docsProject");
+  sel.innerHTML = "";
+  const list = Array.isArray(projects) ? projects : [];
+  for (const p of list) {
+    const opt = document.createElement("option");
+    opt.value = p.id; opt.textContent = p.name ? `${p.name} (${p.id})` : p.id;
+    sel.append(opt);
+  }
+  const syncProjectLink = () => {
+    const link = $("docsProjectLink");
+    if (!sel.value) { link.removeAttribute("href"); link.style.opacity = ".5"; link.style.pointerEvents = "none"; return; }
+    link.href = projectOrigin(sel.value) + PROJECT_OPENAPI_PATH;
+    link.style.opacity = ""; link.style.pointerEvents = "";
+  };
+  sel.onchange = syncProjectLink;
+  syncProjectLink();
+
+  if (docsLoaded) return; // the control-plane reference itself is static
+  const res = await api("GET", "/api/openapi.json");
+  if (!res.ok || !res.data) { $("docsErr").textContent = "Failed to load the API spec."; return; }
+  renderDocs(res.data);
+  docsLoaded = true;
+}
+
+function renderDocs(doc) {
+  const root = $("docsBody");
+  root.innerHTML = "";
+
+  // Group operations by their first tag, then order tags per the spec's tag list.
+  const byTag = new Map();
+  for (const [path, ops] of Object.entries(doc.paths || {})) {
+    for (const [method, op] of Object.entries(ops)) {
+      const tag = (op.tags && op.tags[0]) || "other";
+      if (!byTag.has(tag)) byTag.set(tag, []);
+      byTag.get(tag).push({ path, method, op });
+    }
+  }
+  const tagOrder = (doc.tags || []).map((t) => t.name);
+  const tagDesc = Object.fromEntries((doc.tags || []).map((t) => [t.name, t.description || ""]));
+  const tags = [...byTag.keys()].sort((a, b) => {
+    const ia = tagOrder.indexOf(a), ib = tagOrder.indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+
+  for (const tag of tags) {
+    const sec = document.createElement("div");
+    sec.className = "docs-tag";
+    const h = document.createElement("div"); h.className = "docs-tag-head"; h.textContent = tag;
+    sec.append(h);
+    if (tagDesc[tag]) { const d = document.createElement("div"); d.className = "docs-tag-desc"; d.textContent = tagDesc[tag]; sec.append(d); }
+
+    const ops = byTag.get(tag).sort((a, b) =>
+      a.path === b.path ? METHOD_ORDER.indexOf(a.method) - METHOD_ORDER.indexOf(b.method) : a.path.localeCompare(b.path));
+    for (const { path, method, op } of ops) sec.append(renderOp(path, method, op, doc));
+    root.append(sec);
+  }
+}
+
+function renderOp(path, method, op, doc) {
+  const d = document.createElement("details"); d.className = "docs-op";
+  const sum = document.createElement("summary");
+  const m = document.createElement("span"); m.className = "m " + method; m.textContent = method.toUpperCase();
+  const p = document.createElement("span"); p.className = "p"; p.textContent = path;
+  const s = document.createElement("span"); s.className = "s"; s.textContent = op.summary || "";
+  sum.append(m, p, s); d.append(sum);
+
+  const body = document.createElement("div"); body.className = "body";
+  if (op.description) { const pe = document.createElement("p"); pe.textContent = op.description; body.append(pe); }
+
+  const auth = document.createElement("div");
+  auth.innerHTML = `<h4>Auth</h4><span class="docs-auth">${authLabel(op, doc)}</span>`;
+  body.append(auth);
+
+  const params = op.parameters || [];
+  if (params.length) {
+    const wrap = document.createElement("div");
+    const ul = document.createElement("ul");
+    for (const pr of params) {
+      const li = document.createElement("li");
+      const req = pr.required ? " <em>(required)</em>" : "";
+      li.innerHTML = `<code>${pr.name}</code> <span class="muted">in ${pr.in}</span>${req}` + (pr.description ? ` — ${escapeHtml(pr.description)}` : "");
+      ul.append(li);
+    }
+    wrap.innerHTML = "<h4>Parameters</h4>"; wrap.append(ul); body.append(wrap);
+  }
+
+  const responses = op.responses || {};
+  if (Object.keys(responses).length) {
+    const wrap = document.createElement("div");
+    const ul = document.createElement("ul");
+    for (const [code, r] of Object.entries(responses)) {
+      const li = document.createElement("li");
+      li.innerHTML = `<code>${code}</code>` + (r && r.description ? ` — ${escapeHtml(r.description)}` : "");
+      ul.append(li);
+    }
+    wrap.innerHTML = "<h4>Responses</h4>"; wrap.append(ul); body.append(wrap);
+  }
+
+  d.append(body);
+  return d;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 // --- Files editor (per-project pb_public) ---

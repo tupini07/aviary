@@ -238,6 +238,11 @@ Realtime, batch, file-token and OAuth2 endpoints are part of PocketBase but are
 not enumerated in the per-project spec; see <https://pocketbase.io/docs/> for
 the full PocketBase reference.
 
+The control plane also renders this spec in-app: the **Docs** section reads
+`/api/openapi.json` and lists every control-plane endpoint (grouped by tag, with
+parameters, responses and auth requirements), alongside links to the raw JSON
+and to each project's live `/__aviary/openapi.json`.
+
 ### Static file hosting & editor (pb_public)
 
 Each project can serve static assets (HTML/CSS/JS, a landing page, a full SPA)
