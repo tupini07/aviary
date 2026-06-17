@@ -176,7 +176,7 @@ curl -s -b cj -i http://127.0.0.1:8090/api/projects/alpha/dashboard
 | `POST /api/projects`              | superuser       | Create a project                 |
 | `GET /api/projects/{id}`          | any¹            | Get a project                    |
 | `GET /api/projects/{id}/dashboard`| any¹            | SSO into the project dashboard   |
-| `PATCH /api/projects/{id}`        | superuser       | Enable/disable/rename a project  |
+| `PATCH /api/projects/{id}`        | superuser       | Enable/disable/rename/SPA-toggle a project |
 | `DELETE /api/projects/{id}`       | superuser       | Delete a project + its data      |
 | `GET /api/projects/{id}/files`    | any¹            | List the project's pb_public files |
 | `GET /api/projects/{id}/files/content?path=…` | any¹ | Read a pb_public file            |
@@ -242,6 +242,13 @@ https://<id>.<host>/css/app.css → projects/<id>/pb_public/css/app.css
 Files are read live from disk, so edits show up immediately with no project
 reboot. The API (`/api/...`) and admin dashboard (`/_/...`) always take
 precedence over the static fallback.
+
+**Single-page-app mode.** Each project has a per-project **SPA** toggle (in the
+Files view, or `PATCH /api/projects/{id}` with `{"spa": true}`). When off (the
+default), an unmatched path returns a plain 404. When on, the static server
+serves `index.html` for any path that doesn't resolve to a file, so client-side
+routers (React, Vue, SvelteKit…) own deep links and page reloads. Toggling it
+reboots the project so the new mode takes effect on the next request.
 
 You can manage these files without server/SSH access: the control-plane UI has a
 per-project **Files** button (in the Projects table) that opens a simple editor —
@@ -338,5 +345,5 @@ control-plane SSO handoff to sign in.
 - [x] Invitation flow with project-scoped collaborators
 - [x] One-click dashboard SSO + disabled PocketBase password login (no brute-force surface)
 - [x] Auto-generated OpenAPI 3.1 specs (control plane + on-the-fly per project)
-- [x] Static file hosting per project (`pb_public`) + in-browser file editor
+- [x] Static file hosting per project (`pb_public`) + in-browser file editor + SPA fallback toggle
 - [ ] Per-project quotas and metrics

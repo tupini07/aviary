@@ -99,6 +99,7 @@ type createProjectRequest struct {
 type patchProjectRequest struct {
 	Status *Status `json:"status,omitempty"`
 	Name   *string `json:"name,omitempty"`
+	SPA    *bool   `json:"spa,omitempty"`
 }
 
 // projectView augments a stored Project with live runtime state for API
@@ -191,8 +192,8 @@ func (a *Aviary) apiPatchProject(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req, a) {
 		return
 	}
-	if req.Status == nil && req.Name == nil {
-		a.apiError(w, http.StatusBadRequest, "nothing to update: provide 'status' and/or 'name'")
+	if req.Status == nil && req.Name == nil && req.SPA == nil {
+		a.apiError(w, http.StatusBadRequest, "nothing to update: provide 'status', 'name' and/or 'spa'")
 		return
 	}
 
@@ -200,6 +201,12 @@ func (a *Aviary) apiPatchProject(w http.ResponseWriter, r *http.Request) {
 
 	if req.Name != nil {
 		if err := a.SetProjectName(r.Context(), id, *req.Name); err != nil {
+			a.patchError(w, err)
+			return
+		}
+	}
+	if req.SPA != nil {
+		if err := a.SetProjectSPA(r.Context(), id, *req.SPA); err != nil {
 			a.patchError(w, err)
 			return
 		}

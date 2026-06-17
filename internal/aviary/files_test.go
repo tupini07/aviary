@@ -179,3 +179,46 @@ func TestFilesServedAtSubdomain(t *testing.T) {
 		t.Fatalf("api/health after static route: status %d", apiRec.Code)
 	}
 }
+
+// TestFilesSPAFallback verifies the SPA toggle: with spa=false an unmatched path
+// 404s, and after enabling spa the static server serves index.html for it.
+func TestFilesSPAFallback(t *testing.T) {
+	av := newTestAviary(t)
+	sess := loginAs(t, av, "admin@example.com", "password123")
+	doControl(t, av, http.MethodPost, "/api/projects", createProjectRequest{ID: "alpha"}, sess)
+
+	const html = "<title>spa root</title>"
+	rec := doControl(t, av, http.MethodPut, "/api/projects/alpha/files/content",
+		fileContent{Path: "index.html", Content: html}, sess)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("write index.html: status %d body %s", rec.Code, rec.Body.String())
+	}
+
+	get := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/app/deep/link", nil)
+		req.Host = "alpha.localhost"
+		w := httptest.NewRecorder()
+		av.ServeHTTP(w, req)
+		return w
+	}
+
+	// Default (spa=false): an unmatched client route 404s.
+	if w := get(); w.Code != http.StatusNotFound {
+		t.Fatalf("spa off: status %d, want 404", w.Code)
+	}
+
+	// Enable SPA mode; this reboots the project on its next request.
+	rec = doControl(t, av, http.MethodPatch, "/api/projects/alpha", map[string]bool{"spa": true}, sess)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("enable spa: status %d body %s", rec.Code, rec.Body.String())
+	}
+
+	// Now the unmatched route falls back to index.html.
+	w := get()
+	if w.Code != http.StatusOK {
+		t.Fatalf("spa on: status %d, want 200 (body %s)", w.Code, w.Body.String())
+	}
+	if w.Body.String() != html {
+		t.Fatalf("spa fallback body = %q, want index.html %q", w.Body.String(), html)
+	}
+}

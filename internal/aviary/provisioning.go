@@ -83,6 +83,17 @@ func (a *Aviary) SetProjectName(ctx context.Context, id, name string) error {
 	return a.store.SetName(ctx, id, name)
 }
 
+// SetProjectSPA toggles a project's single-page-app static fallback. Because the
+// fallback mode is baked into the static route when the project boots, the
+// project is evicted so it reboots with the new setting on its next request.
+func (a *Aviary) SetProjectSPA(ctx context.Context, id string, spa bool) error {
+	if err := a.store.SetSPA(ctx, id, spa); err != nil {
+		return err
+	}
+	a.evict(id)
+	return nil
+}
+
 // DeleteProject stops the project's app (if running), removes its registry
 // entry and deletes its data directory. Returns ErrNotFound if it does not
 // exist.

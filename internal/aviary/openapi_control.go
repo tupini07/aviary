@@ -129,7 +129,7 @@ func controlOpenAPI(serverURL string) oa {
 				"responses":  oa{"200": oa{"description": "Project", "content": jsonBody(ref("Project"))["content"]}, "404": errResp("Project not found")},
 			},
 			"patch": oa{
-				"tags": []any{"projects"}, "summary": "Update a project's name and/or status (superuser only)",
+				"tags": []any{"projects"}, "summary": "Update a project's name, status and/or SPA mode (superuser only)",
 				"parameters":  []any{idParam},
 				"requestBody": jsonBody(ref("PatchProject")),
 				"responses":   oa{"200": oa{"description": "Updated project", "content": jsonBody(ref("ProjectView"))["content"]}, "400": errResp("Nothing to update or invalid status"), "404": errResp("Project not found")},
@@ -287,6 +287,7 @@ func controlOpenAPI(serverURL string) oa {
 						"id":      oa{"type": "string"},
 						"name":    oa{"type": "string"},
 						"status":  oa{"type": "string", "enum": []any{"active", "disabled"}},
+						"spa":     oa{"type": "boolean", "description": "Serve index.html for unmatched paths (single-page-app fallback)."},
 						"created": oa{"type": "string", "format": "date-time"},
 						"updated": oa{"type": "string", "format": "date-time"},
 					},
@@ -310,6 +311,7 @@ func controlOpenAPI(serverURL string) oa {
 					"properties": oa{
 						"name":   oa{"type": "string"},
 						"status": oa{"type": "string", "enum": []any{"active", "disabled"}},
+						"spa":    oa{"type": "boolean", "description": "Toggle single-page-app fallback; reboots the project."},
 					},
 				},
 				"Passkey": oa{

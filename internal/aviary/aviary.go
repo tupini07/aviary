@@ -152,7 +152,7 @@ func (a *Aviary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c, err := a.getCage(id)
+	c, err := a.getCage(id, p.SPA)
 	if err != nil {
 		a.log.Error("failed to start project", "project", id, "error", err)
 		http.Error(w, "failed to start project: "+err.Error(), http.StatusInternalServerError)
@@ -176,12 +176,14 @@ func (a *Aviary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // getCage returns the running cage for id, booting it lazily on first use.
-// Concurrent callers for the same id share a single boot (single-flight).
-func (a *Aviary) getCage(id string) (*cage, error) {
+// Concurrent callers for the same id share a single boot (single-flight). spa
+// configures the project's static-file fallback mode at boot; toggling it later
+// evicts the cage so the next boot picks up the new value.
+func (a *Aviary) getCage(id string, spa bool) (*cage, error) {
 	a.mu.Lock()
 	c, ok := a.cages[id]
 	if !ok {
-		c = &cage{id: id, ready: make(chan struct{}), allowDashboardPassword: a.cfg.AllowDashboardPassword}
+		c = &cage{id: id, spa: spa, ready: make(chan struct{}), allowDashboardPassword: a.cfg.AllowDashboardPassword}
 		a.cages[id] = c
 		go func() {
 			c.startErr = c.start(a.projectsDir, a.log)

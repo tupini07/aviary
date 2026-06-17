@@ -18,7 +18,11 @@ import (
 // root (e.g. https://<project>.<host>/index.html), mirroring PocketBase's own
 // pb_public convention. Files are read live from disk, so edits made through the
 // control-plane editor are served immediately without rebooting the project.
-func buildHandler(app core.App, publicDir string) (http.Handler, error) {
+//
+// When spa is true the file server falls back to index.html for any path that
+// doesn't resolve to a file, so client-side routers can own deep links; when
+// false, unmatched paths return a plain 404.
+func buildHandler(app core.App, publicDir string, spa bool) (http.Handler, error) {
 	// Apply any pending migrations, exactly as apis.Serve does on startup.
 	if err := app.RunAllMigrations(); err != nil {
 		return nil, err
@@ -54,7 +58,7 @@ func buildHandler(app core.App, publicDir string) (http.Handler, error) {
 		// Serve the project's pb_public as a static-file fallback at the root,
 		// registered last so it never shadows the API or dashboard routes.
 		if publicDir != "" && !e.Router.HasRoute(http.MethodGet, "/{path...}") {
-			e.Router.GET("/{path...}", apis.Static(os.DirFS(publicDir), false))
+			e.Router.GET("/{path...}", apis.Static(os.DirFS(publicDir), spa))
 		}
 
 		mux, err := e.Router.BuildMux()

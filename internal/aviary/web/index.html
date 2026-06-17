@@ -146,6 +146,9 @@
     tab-size: 2; }
   #fvContent:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(51, 118, 229, .14); }
   #fvContent:disabled { background: var(--panel2); color: var(--muted); }
+  .toggle { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 14px; line-height: 1.5; }
+  .toggle input { width: auto; margin: 3px 0 0; flex: 0 0 auto; }
+  .toggle span { color: var(--fg); }
 
   @media (max-width: 720px) {
     .files-layout { flex-direction: column; }
@@ -261,6 +264,13 @@
         <button id="fvBack" class="ghost" style="margin-bottom:10px">← Back to projects</button>
         <h1>Files <span class="muted" id="fvProject" style="font-weight:400"></span></h1>
         <p>Edit the static files served from this project's <code>pb_public</code> directory at its public URL.</p>
+      </div>
+      <div class="card su-only" id="fvOptionsCard">
+        <label class="toggle">
+          <input type="checkbox" id="fvSpa" />
+          <span><strong>Single-page-app mode</strong> — serve <code>index.html</code> for any path that doesn't match a file, so client-side routers (React, Vue, SvelteKit…) own deep links. Toggling reboots the project.</span>
+        </label>
+        <div class="err" id="fvSpaErr"></div>
       </div>
       <div class="card">
         <div class="files-layout">
@@ -837,6 +847,7 @@ function fvSetError(msg) { $("fvErr").textContent = msg || ""; }
 function openFiles(p) {
   fvState = { id: p.id, name: p.name || "", current: null };
   $("fvProject").textContent = `· ${p.id}`;
+  $("fvSpa").checked = !!p.spa;
   fvClearEditor();
   fvSetError("");
   showView("files");
@@ -919,6 +930,14 @@ $("fvSave").addEventListener("click", saveFile);
 $("fvDelete").addEventListener("click", deleteFile);
 $("fvNew").addEventListener("click", newFile);
 $("fvNewPath").addEventListener("keydown", (e) => { if (e.key === "Enter") newFile(); });
+$("fvSpa").addEventListener("change", async (e) => {
+  $("fvSpaErr").textContent = "";
+  const res = await api("PATCH", `/api/projects/${fvState.id}`, { spa: e.target.checked });
+  if (!res.ok) {
+    e.target.checked = !e.target.checked; // revert on failure
+    $("fvSpaErr").textContent = (res.data && res.data.error) || "Failed to update SPA mode.";
+  }
+});
 
 refresh();
 </script>

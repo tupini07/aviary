@@ -25,6 +25,10 @@ type cage struct {
 	// way into the dashboard is an Aviary-minted token.
 	allowDashboardPassword bool
 
+	// spa enables single-page-app fallback for the project's pb_public static
+	// server: unmatched paths serve index.html instead of returning 404.
+	spa bool
+
 	ready    chan struct{} // closed once start() has finished (success or failure)
 	startErr error
 
@@ -64,7 +68,7 @@ func (c *cage) start(projectsDir string, log *slog.Logger) error {
 			})
 	}
 
-	handler, err := buildHandler(app, filepath.Join(dir, "pb_public"))
+	handler, err := buildHandler(app, filepath.Join(dir, "pb_public"), c.spa)
 	if err != nil {
 		_ = app.ResetBootstrapState()
 		return err

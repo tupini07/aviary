@@ -145,6 +145,42 @@ func TestSetStatus(t *testing.T) {
 	}
 }
 
+func TestSetSPA(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	p, err := s.Create(ctx, "alpha", "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if p.SPA {
+		t.Fatalf("new project should default to spa=false")
+	}
+
+	if err := s.SetSPA(ctx, "alpha", true); err != nil {
+		t.Fatalf("SetSPA: %v", err)
+	}
+	got, err := s.Get(ctx, "alpha")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !got.SPA {
+		t.Errorf("spa = %v, want true", got.SPA)
+	}
+
+	if err := s.SetSPA(ctx, "alpha", false); err != nil {
+		t.Fatalf("SetSPA off: %v", err)
+	}
+	got, _ = s.Get(ctx, "alpha")
+	if got.SPA {
+		t.Errorf("spa = %v, want false", got.SPA)
+	}
+
+	if err := s.SetSPA(ctx, "missing", true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetSPA missing: got %v, want ErrNotFound", err)
+	}
+}
+
 func TestDelete(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

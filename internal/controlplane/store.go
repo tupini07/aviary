@@ -54,6 +54,7 @@ type Project struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	Status    Status    `json:"status"`
+	SPA       bool      `json:"spa"`
 	CreatedAt time.Time `json:"created"`
 	UpdatedAt time.Time `json:"updated"`
 }
@@ -98,6 +99,7 @@ CREATE TABLE IF NOT EXISTS projects (
 	id         TEXT PRIMARY KEY,
 	name       TEXT NOT NULL DEFAULT '',
 	status     TEXT NOT NULL DEFAULT 'active',
+	spa        INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
@@ -144,6 +146,14 @@ CREATE TABLE IF NOT EXISTS invitations (
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("controlplane: migrate: %w", err)
 	}
+	// Additive column migrations for databases created before the column
+	// existed. SQLite has no "ADD COLUMN IF NOT EXISTS", so ignore the
+	// duplicate-column error that a re-run produces.
+	if _, err := s.db.ExecContext(ctx,
+		`ALTER TABLE projects ADD COLUMN spa INTEGER NOT NULL DEFAULT 0`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("controlplane: migrate spa column: %w", err)
+	}
 	return nil
 }
 
@@ -164,8 +174,8 @@ func (s *Store) Create(ctx context.Context, id, name string) (*Project, error) {
 	}
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO projects (id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		p.ID, p.Name, string(p.Status), formatTime(p.CreatedAt), formatTime(p.UpdatedAt),
+		`INSERT INTO projects (id, name, status, spa, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, string(p.Status), boolToInt(p.SPA), formatTime(p.CreatedAt), formatTime(p.UpdatedAt),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -179,7 +189,7 @@ func (s *Store) Create(ctx context.Context, id, name string) (*Project, error) {
 // Get returns the project with the given id, or ErrNotFound.
 func (s *Store) Get(ctx context.Context, id string) (*Project, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, status, created_at, updated_at FROM projects WHERE id = ?`, id)
+		`SELECT id, name, status, spa, created_at, updated_at FROM projects WHERE id = ?`, id)
 	p, err := scanProject(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -193,7 +203,7 @@ func (s *Store) Get(ctx context.Context, id string) (*Project, error) {
 // List returns all projects ordered by id.
 func (s *Store) List(ctx context.Context) ([]*Project, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, status, created_at, updated_at FROM projects ORDER BY id`)
+		`SELECT id, name, status, spa, created_at, updated_at FROM projects ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: list: %w", err)
 	}
@@ -233,6 +243,20 @@ func (s *Store) SetName(ctx context.Context, id, name string) error {
 		name, formatTime(s.now().UTC()), id)
 	if err != nil {
 		return fmt.Errorf("controlplane: set name %q: %w", id, err)
+	}
+	return requireAffected(res)
+}
+
+// SetSPA updates a project's single-page-app fallback mode. When enabled, the
+// static file server serves index.html for any path that doesn't match a file,
+// letting client-side routers handle deep links. Returns ErrNotFound if the
+// project does not exist.
+func (s *Store) SetSPA(ctx context.Context, id string, spa bool) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE projects SET spa = ?, updated_at = ? WHERE id = ?`,
+		boolToInt(spa), formatTime(s.now().UTC()), id)
+	if err != nil {
+		return fmt.Errorf("controlplane: set spa %q: %w", id, err)
 	}
 	return requireAffected(res)
 }
@@ -355,6 +379,13 @@ const timeLayout = time.RFC3339Nano
 
 func formatTime(t time.Time) string { return t.UTC().Format(timeLayout) }
 
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func parseTime(s string) (time.Time, error) { return time.Parse(timeLayout, s) }
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.
@@ -366,12 +397,14 @@ func scanProject(sc scanner) (*Project, error) {
 	var (
 		p                      Project
 		status                 string
+		spa                    int
 		createdRaw, updatedRaw string
 	)
-	if err := sc.Scan(&p.ID, &p.Name, &status, &createdRaw, &updatedRaw); err != nil {
+	if err := sc.Scan(&p.ID, &p.Name, &status, &spa, &createdRaw, &updatedRaw); err != nil {
 		return nil, err
 	}
 	p.Status = Status(status)
+	p.SPA = spa != 0
 
 	var err error
 	if p.CreatedAt, err = parseTime(createdRaw); err != nil {
