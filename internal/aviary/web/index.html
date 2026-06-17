@@ -151,6 +151,17 @@
   .toggle span { color: var(--fg); }
   .files-title { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .files-title h1 { margin: 0; }
+  .keys-list { list-style: none; margin: 0; padding: 0; }
+  .keys-list li { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+  .keys-list li:first-child { border-top: 1px solid var(--border); }
+  .keys-list .k-label { font-weight: 600; }
+  .keys-list .k-meta { color: var(--muted); font-size: 12px; }
+  .keys-list .k-spacer { flex: 1; }
+  .key-reveal { margin-top: 12px; padding: 12px; border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--ok), white 86%); border: 1px solid color-mix(in srgb, var(--ok), white 60%); }
+  .key-reveal-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+  .key-reveal code { font-family: ui-monospace, Menlo, monospace; word-break: break-all;
+    background: #fff; padding: 5px 9px; border-radius: 4px; border: 1px solid var(--border); flex: 1; }
 
   @media (max-width: 720px) {
     .files-layout { flex-direction: column; }
@@ -276,6 +287,29 @@
           <span><strong>Single-page-app mode</strong> — serve <code>index.html</code> for any path that doesn't match a file, so client-side routers (React, Vue, SvelteKit…) own deep links. Toggling reboots the project.</span>
         </label>
         <div class="err" id="fvSpaErr"></div>
+      </div>
+      <div class="card" id="fvKeysCard">
+        <h2 style="margin-top:0">API keys</h2>
+        <p class="muted" style="font-size:13px; margin-top:0">
+          Non-interactive credentials for agents or CI to publish files to this project via
+          <code>Authorization: Bearer &lt;token&gt;</code>. A key is scoped to this project only,
+          and its token is shown once — at creation.
+        </p>
+        <ul id="fvKeysList" class="keys-list"></ul>
+        <div class="empty hidden" id="fvKeysEmpty">No API keys yet.</div>
+        <div class="key-reveal hidden" id="fvKeyReveal">
+          <strong>Copy your new key now — it won't be shown again:</strong>
+          <div class="key-reveal-row">
+            <code id="fvKeyToken"></code>
+            <button id="fvKeyCopy" class="ghost" type="button">Copy</button>
+          </div>
+        </div>
+        <div class="row" style="margin-top:14px; align-items:flex-end">
+          <div><label for="fvKeyLabel">Label</label><input id="fvKeyLabel" placeholder="github-actions" /></div>
+          <div><label for="fvKeyDays">Expires in days <span class="muted">(optional)</span></label><input id="fvKeyDays" type="number" min="1" placeholder="never" /></div>
+          <div style="flex:0 0 auto"><button id="fvKeyCreate" class="secondary" type="button">Create key</button></div>
+        </div>
+        <div class="err" id="fvKeysErr"></div>
       </div>
       <div class="card">
         <div class="files-layout">
@@ -880,8 +914,11 @@ function openFiles(p) {
   $("fvVisit").href = projectOrigin(p.id) + "/";
   fvClearEditor();
   fvSetError("");
+  $("fvKeyReveal").classList.add("hidden");
+  $("fvKeysErr").textContent = "";
   showView("files");
   loadFiles();
+  loadKeys();
 }
 
 function fvClearEditor() {
@@ -960,6 +997,71 @@ $("fvSave").addEventListener("click", saveFile);
 $("fvDelete").addEventListener("click", deleteFile);
 $("fvNew").addEventListener("click", newFile);
 $("fvNewPath").addEventListener("keydown", (e) => { if (e.key === "Enter") newFile(); });
+
+function fmtDate(s) { return s ? new Date(s).toLocaleString() : ""; }
+
+async function loadKeys() {
+  const res = await api("GET", `/api/projects/${fvState.id}/keys`);
+  const list = $("fvKeysList");
+  list.innerHTML = "";
+  if (!res.ok) { $("fvKeysErr").textContent = (res.data && res.data.error) || "Failed to load API keys."; return; }
+  const keys = Array.isArray(res.data) ? res.data : [];
+  $("fvKeysEmpty").classList.toggle("hidden", keys.length !== 0);
+  for (const k of keys) {
+    const li = document.createElement("li");
+    const main = document.createElement("div");
+    const label = document.createElement("div");
+    label.className = "k-label";
+    label.textContent = k.label || "(unlabeled)";
+    const meta = document.createElement("div");
+    meta.className = "k-meta";
+    const bits = [`created ${fmtDate(k.created)}`];
+    bits.push(k.lastUsed ? `last used ${fmtDate(k.lastUsed)}` : "never used");
+    if (k.expires) bits.push(`expires ${fmtDate(k.expires)}`);
+    meta.textContent = bits.join(" · ");
+    main.append(label, meta);
+    const spacer = document.createElement("div");
+    spacer.className = "k-spacer";
+    const del = document.createElement("button");
+    del.className = "danger";
+    del.textContent = "Revoke";
+    del.onclick = () => revokeKey(k.id, k.label);
+    li.append(main, spacer, del);
+    list.append(li);
+  }
+}
+
+async function createKey() {
+  $("fvKeysErr").textContent = "";
+  const label = $("fvKeyLabel").value.trim();
+  const daysRaw = $("fvKeyDays").value.trim();
+  const body = { label };
+  if (daysRaw) {
+    const days = parseInt(daysRaw, 10);
+    if (!Number.isInteger(days) || days <= 0) { $("fvKeysErr").textContent = "Expiry must be a positive number of days."; return; }
+    body.expiresInDays = days;
+  }
+  const res = await api("POST", `/api/projects/${fvState.id}/keys`, body);
+  if (!res.ok) { $("fvKeysErr").textContent = (res.data && res.data.error) || "Failed to create API key."; return; }
+  $("fvKeyLabel").value = "";
+  $("fvKeyDays").value = "";
+  $("fvKeyToken").textContent = res.data.token;
+  $("fvKeyReveal").classList.remove("hidden");
+  await loadKeys();
+}
+
+async function revokeKey(id, label) {
+  if (!confirm(`Revoke API key "${label || id}"? Any client using it will stop working.`)) return;
+  $("fvKeysErr").textContent = "";
+  const res = await api("DELETE", `/api/projects/${fvState.id}/keys/${encodeURIComponent(id)}`);
+  if (!res.ok) { $("fvKeysErr").textContent = (res.data && res.data.error) || "Failed to revoke API key."; return; }
+  await loadKeys();
+}
+
+$("fvKeyCreate").addEventListener("click", createKey);
+$("fvKeyCopy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("fvKeyToken").textContent); $("fvKeyCopy").textContent = "Copied"; setTimeout(() => { $("fvKeyCopy").textContent = "Copy"; }, 1500); } catch (_) {}
+});
 $("fvSpa").addEventListener("change", async (e) => {
   $("fvSpaErr").textContent = "";
   const res = await api("PATCH", `/api/projects/${fvState.id}`, { spa: e.target.checked });

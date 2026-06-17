@@ -15,6 +15,9 @@ func (a *Aviary) apiControlOpenAPI(w http.ResponseWriter, r *http.Request) {
 func controlOpenAPI(serverURL string) oa {
 	// cookieAuth secures most endpoints; public ones override security to [].
 	public := []any{}
+	// cookieOrKey marks endpoints reachable either with an interactive session
+	// cookie or a project-scoped API key (Authorization: Bearer av_...).
+	cookieOrKey := []any{oa{"cookieAuth": []any{}}, oa{"bearerAuth": []any{}}}
 
 	errResp := func(desc string) oa {
 		return oa{"description": desc, "content": jsonBody(ref("Error"))["content"]}
@@ -32,6 +35,11 @@ func controlOpenAPI(serverURL string) oa {
 	filePathParam := oa{
 		"name": "path", "in": "query", "required": true,
 		"description": "File path relative to pb_public, forward-slash separated (e.g. index.html or css/app.css).",
+		"schema":      oa{"type": "string"},
+	}
+	keyIDParam := oa{
+		"name": "keyId", "in": "path", "required": true,
+		"description": "API key id (the public identifier, not the secret token).",
 		"schema":      oa{"type": "string"},
 	}
 
@@ -151,7 +159,8 @@ func controlOpenAPI(serverURL string) oa {
 		"/api/projects/{id}/files": oa{
 			"get": oa{
 				"tags": []any{"files"}, "summary": "List static files served from the project's pb_public directory",
-				"description": "Superusers may list any project's files; collaborators only projects they have been granted.",
+				"description": "Superusers may list any project's files; collaborators only projects they have been granted. Accepts either a session cookie or a project-scoped API key.",
+				"security":    cookieOrKey,
 				"parameters":  []any{idParam},
 				"responses":   oa{"200": oa{"description": "Flat, sorted file listing", "content": jsonBody(oa{"type": "array", "items": ref("FileEntry")})["content"]}, "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found")},
 			},
@@ -159,20 +168,45 @@ func controlOpenAPI(serverURL string) oa {
 		"/api/projects/{id}/files/content": oa{
 			"get": oa{
 				"tags": []any{"files"}, "summary": "Read a single pb_public file",
+				"security":   cookieOrKey,
 				"parameters": []any{idParam, filePathParam},
 				"responses":  oa{"200": oa{"description": "File content", "content": jsonBody(ref("FileContent"))["content"]}, "400": errResp("Invalid path"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("File not found"), "413": errResp("File is too large to edit")},
 			},
 			"put": oa{
 				"tags": []any{"files"}, "summary": "Create or overwrite a pb_public file",
-				"description": "Creates any missing parent directories. Files are served live, so changes are visible immediately at the project URL.",
+				"description": "Creates any missing parent directories. Files are served live, so changes are visible immediately at the project URL. Accepts either a session cookie or a project-scoped API key.",
+				"security":    cookieOrKey,
 				"parameters":  []any{idParam},
 				"requestBody": jsonBody(ref("FileContent")),
 				"responses":   oa{"200": oa{"description": "File written", "content": jsonBody(ref("FileEntry"))["content"]}, "400": errResp("Invalid path"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found"), "413": errResp("Content is too large")},
 			},
 			"delete": oa{
 				"tags": []any{"files"}, "summary": "Delete a single pb_public file",
+				"security":   cookieOrKey,
 				"parameters": []any{idParam, filePathParam},
 				"responses":  oa{"204": oa{"description": "Deleted"}, "400": errResp("Invalid path"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("File not found")},
+			},
+		},
+		"/api/projects/{id}/keys": oa{
+			"get": oa{
+				"tags": []any{"keys"}, "summary": "List a project's API keys",
+				"description": "Returns key metadata only — the secret token is shown once at creation and never again. Owner-only (superuser or granted collaborator); API keys cannot manage keys.",
+				"parameters":  []any{idParam},
+				"responses":   oa{"200": oa{"description": "API keys", "content": jsonBody(oa{"type": "array", "items": ref("APIKey")})["content"]}, "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found")},
+			},
+			"post": oa{
+				"tags": []any{"keys"}, "summary": "Create a project-scoped API key",
+				"description": "Mints a non-interactive credential for agents/CI to drive this project's file (and future deploy) endpoints via Authorization: Bearer. The raw token is returned exactly once.",
+				"parameters":  []any{idParam},
+				"requestBody": jsonBody(ref("CreateAPIKey")),
+				"responses":   oa{"201": oa{"description": "Key created (token shown once)", "content": jsonBody(ref("CreatedAPIKey"))["content"]}, "400": errResp("Invalid request"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found")},
+			},
+		},
+		"/api/projects/{id}/keys/{keyId}": oa{
+			"delete": oa{
+				"tags": []any{"keys"}, "summary": "Revoke an API key",
+				"parameters": []any{idParam, keyIDParam},
+				"responses":  oa{"204": oa{"description": "Revoked"}, "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("API key not found")},
 			},
 		},
 		"/api/superuser": oa{
@@ -241,6 +275,7 @@ func controlOpenAPI(serverURL string) oa {
 			oa{"name": "passkey", "description": "WebAuthn passkeys"},
 			oa{"name": "projects", "description": "Project (cage) lifecycle"},
 			oa{"name": "files", "description": "Per-project static files (pb_public)"},
+			oa{"name": "keys", "description": "Per-project API keys for agents/CI"},
 			oa{"name": "superuser", "description": "Platform superuser"},
 			oa{"name": "collaborators", "description": "Per-project collaborators"},
 			oa{"name": "invitations", "description": "Collaborator invitations"},
@@ -253,6 +288,10 @@ func controlOpenAPI(serverURL string) oa {
 				"cookieAuth": oa{
 					"type": "apiKey", "in": "cookie", "name": sessionCookie,
 					"description": "Session cookie set by POST /api/auth/login or a passkey sign-in.",
+				},
+				"bearerAuth": oa{
+					"type": "http", "scheme": "bearer",
+					"description": "A project-scoped API key (token of the form av_...) sent as 'Authorization: Bearer <token>'. Authorizes only that project's file and deploy endpoints.",
 				},
 			},
 			"schemas": oa{
@@ -343,6 +382,30 @@ func controlOpenAPI(serverURL string) oa {
 					"properties": oa{
 						"path":    oa{"type": "string", "description": "Path relative to pb_public, forward-slash separated."},
 						"content": oa{"type": "string", "description": "UTF-8 text content of the file."},
+					},
+				},
+				"APIKey": oa{
+					"type": "object",
+					"properties": oa{
+						"id":        oa{"type": "string", "description": "Public key id (used to revoke; not the secret token)."},
+						"projectId": oa{"type": "string"},
+						"label":     oa{"type": "string"},
+						"created":   oa{"type": "string", "format": "date-time"},
+						"lastUsed":  oa{"type": "string", "format": "date-time", "description": "When the key was last used to authenticate, if ever."},
+						"expires":   oa{"type": "string", "format": "date-time", "description": "Expiry, if the key was created with one."},
+					},
+				},
+				"CreateAPIKey": oa{
+					"type": "object",
+					"properties": oa{
+						"label":         oa{"type": "string", "description": "Human-readable label (e.g. 'github-actions')."},
+						"expiresInDays": oa{"type": "integer", "description": "Optional lifetime in days; omit for a non-expiring key."},
+					},
+				},
+				"CreatedAPIKey": oa{
+					"allOf": []any{
+						ref("APIKey"),
+						oa{"type": "object", "required": []any{"token"}, "properties": oa{"token": oa{"type": "string", "description": "The secret token, shown exactly once. Send it as 'Authorization: Bearer <token>'."}}},
 					},
 				},
 				"Invitation": oa{

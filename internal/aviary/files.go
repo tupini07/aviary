@@ -16,15 +16,44 @@ const maxEditableFileSize = 5 << 20 // 5 MiB
 
 // authorizeProjectAccess verifies the caller may administer project id: a
 // superuser may touch any project, a collaborator only the projects they have
-// been granted. It writes the appropriate error response and returns false on
-// denial.
+// been granted, and a project-scoped API key only its own project. It writes the
+// appropriate error response and returns false on denial.
 func (a *Aviary) authorizeProjectAccess(w http.ResponseWriter, r *http.Request, id string) (email string, ok bool) {
+	return a.authorizeProject(w, r, id, true)
+}
+
+// authorizeProjectAdmin is like authorizeProjectAccess but rejects API-key
+// principals. It gates owner-only actions (such as managing a project's API
+// keys) so that a leaked deploy key cannot escalate by minting further keys.
+func (a *Aviary) authorizeProjectAdmin(w http.ResponseWriter, r *http.Request, id string) (email string, ok bool) {
+	return a.authorizeProject(w, r, id, false)
+}
+
+// authorizeProject is the shared access check behind authorizeProjectAccess and
+// authorizeProjectAdmin. allowAPIKey controls whether a project-scoped API key
+// is accepted in addition to interactive superuser/collaborator sessions.
+func (a *Aviary) authorizeProject(w http.ResponseWriter, r *http.Request, id string, allowAPIKey bool) (email string, ok bool) {
 	email, role, authed := a.identity(r)
 	if !authed {
 		a.apiError(w, http.StatusUnauthorized, "authentication required")
 		return "", false
 	}
-	if role != roleSuperuser {
+	switch role {
+	case roleSuperuser:
+		return email, true
+	case roleAPIKey:
+		if !allowAPIKey {
+			a.apiError(w, http.StatusForbidden, "API keys cannot perform this action")
+			return "", false
+		}
+		key, keyOK := a.authenticateAPIKey(r)
+		if !keyOK || key.ProjectID != id {
+			a.apiError(w, http.StatusForbidden, "no access to this project")
+			return "", false
+		}
+		_ = a.store.TouchAPIKey(r.Context(), key.ID)
+		return email, true
+	default: // collaborator
 		granted, err := a.store.CollaboratorHasProject(r.Context(), email, id)
 		if err != nil {
 			a.apiError(w, http.StatusInternalServerError, err.Error())
@@ -34,8 +63,8 @@ func (a *Aviary) authorizeProjectAccess(w http.ResponseWriter, r *http.Request, 
 			a.apiError(w, http.StatusForbidden, "no access to this project")
 			return "", false
 		}
+		return email, true
 	}
-	return email, true
 }
 
 // projectPublicDir returns the absolute path of a project's pb_public directory,

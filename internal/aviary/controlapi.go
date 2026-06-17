@@ -46,6 +46,14 @@ func (a *Aviary) controlHandler() http.Handler {
 	mux.HandleFunc("PUT /api/projects/{id}/files/content", a.requireAuth(a.apiWriteFile))
 	mux.HandleFunc("DELETE /api/projects/{id}/files/content", a.requireAuth(a.apiDeleteFile))
 
+	// Project-scoped API keys: non-interactive credentials for agents/CI to
+	// drive the file (and future deploy) endpoints. Management is owner-only
+	// (superuser or granted collaborator); API keys themselves cannot manage
+	// keys.
+	mux.HandleFunc("GET /api/projects/{id}/keys", a.requireAuth(a.apiListAPIKeys))
+	mux.HandleFunc("POST /api/projects/{id}/keys", a.requireAuth(a.apiCreateAPIKey))
+	mux.HandleFunc("DELETE /api/projects/{id}/keys/{keyId}", a.requireAuth(a.apiDeleteAPIKey))
+
 	mux.HandleFunc("GET /api/superuser", a.requireSuperuser(a.apiGetSuperuser))
 	// PUT is allowed without auth only for first-run setup (no superuser yet);
 	// afterwards it requires an authenticated superuser session.

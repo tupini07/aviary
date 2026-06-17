@@ -26,6 +26,10 @@ const ctxSuperuserEmail ctxKey = "superuser_email"
 const (
 	roleSuperuser    = "superuser"
 	roleCollaborator = "collaborator"
+	// roleAPIKey is the role of a request authenticated by a project-scoped
+	// API key. It can act only on its bound project's files/deploys and can
+	// never perform superuser or owner-only operations.
+	roleAPIKey = "apikey"
 )
 
 // signSession builds a signed, tamper-evident session token of the form
@@ -68,14 +72,19 @@ func (a *Aviary) sessionMAC(payload string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-// identity returns the authenticated email and role from the request's session
-// cookie, or ("", "", false) if the request is not authenticated.
+// identity returns the authenticated email and role for a request. It first
+// tries the session cookie (interactive superuser/collaborator), then falls
+// back to a project-scoped API key in the Authorization header.
 func (a *Aviary) identity(r *http.Request) (email, role string, ok bool) {
-	c, err := r.Cookie(sessionCookie)
-	if err != nil {
-		return "", "", false
+	if c, err := r.Cookie(sessionCookie); err == nil {
+		if email, role, ok = a.verifySession(c.Value); ok {
+			return email, role, true
+		}
 	}
-	return a.verifySession(c.Value)
+	if key, ok := a.authenticateAPIKey(r); ok {
+		return apiKeyPrincipal(key.ProjectID), roleAPIKey, true
+	}
+	return "", "", false
 }
 
 // currentSuperuser returns the authenticated superuser email from the request's

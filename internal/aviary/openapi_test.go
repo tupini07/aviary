@@ -44,6 +44,7 @@ func TestControlOpenAPI(t *testing.T) {
 	for _, want := range []string{
 		"/api/openapi.json", "/api/auth/login", "/api/projects",
 		"/api/projects/{id}", "/api/projects/{id}/dashboard", "/api/invitations",
+		"/api/projects/{id}/keys", "/api/projects/{id}/keys/{keyId}",
 	} {
 		if _, ok := p[want]; !ok {
 			t.Errorf("control spec missing path %q", want)
@@ -61,6 +62,18 @@ func TestControlOpenAPI(t *testing.T) {
 	schemas := doc["components"].(map[string]any)["schemas"].(map[string]any)
 	if _, ok := schemas["Project"]; !ok {
 		t.Errorf("control spec missing Project schema")
+	}
+	for _, want := range []string{"APIKey", "CreateAPIKey", "CreatedAPIKey"} {
+		if _, ok := schemas[want]; !ok {
+			t.Errorf("control spec missing %s schema", want)
+		}
+	}
+
+	// The API-key security scheme must be declared so agents/CI know how to
+	// authenticate file/deploy calls.
+	secSchemes := doc["components"].(map[string]any)["securitySchemes"].(map[string]any)
+	if _, ok := secSchemes["bearerAuth"]; !ok {
+		t.Errorf("control spec missing bearerAuth security scheme")
 	}
 }
 

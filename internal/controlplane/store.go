@@ -142,7 +142,19 @@ CREATE TABLE IF NOT EXISTS invitations (
 	project_id TEXT NOT NULL,
 	expires_at TEXT NOT NULL,
 	created_at TEXT NOT NULL
-);`
+);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+	id           TEXT PRIMARY KEY,
+	project_id   TEXT NOT NULL,
+	label        TEXT NOT NULL DEFAULT '',
+	key_hash     TEXT NOT NULL UNIQUE,
+	created_at   TEXT NOT NULL,
+	last_used_at TEXT,
+	expires_at   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_keys_project ON api_keys (project_id);`
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("controlplane: migrate: %w", err)
 	}
@@ -279,6 +291,9 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM invitations WHERE project_id = ?`, id); err != nil {
 		return fmt.Errorf("controlplane: delete project invitations %q: %w", id, err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM api_keys WHERE project_id = ?`, id); err != nil {
+		return fmt.Errorf("controlplane: delete project api keys %q: %w", id, err)
 	}
 	return nil
 }

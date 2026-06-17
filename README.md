@@ -182,6 +182,9 @@ curl -s -b cj -i http://127.0.0.1:8090/api/projects/alpha/dashboard
 | `GET /api/projects/{id}/files/content?path=…` | any¹ | Read a pb_public file            |
 | `PUT /api/projects/{id}/files/content` | any¹       | Create/overwrite a pb_public file |
 | `DELETE /api/projects/{id}/files/content?path=…` | any¹ | Delete a pb_public file       |
+| `GET /api/projects/{id}/keys`     | owner³          | List a project's API keys        |
+| `POST /api/projects/{id}/keys`    | owner³          | Mint a project-scoped API key (token shown once) |
+| `DELETE /api/projects/{id}/keys/{keyId}` | owner³   | Revoke an API key                |
 | `GET /api/projects`               | any¹            | List projects (scoped by access) |
 | `POST /api/invitations`           | superuser       | Invite a collaborator to a project |
 | `GET /api/invitations`            | superuser       | List pending invitations         |
@@ -194,9 +197,15 @@ curl -s -b cj -i http://127.0.0.1:8090/api/projects/alpha/dashboard
 ¹ `GET /api/projects`, `GET /api/projects/{id}`, the dashboard SSO and the
 per-project `files` endpoints are available to collaborators too, but only for
 the projects they have been granted; instance-wide mutations are superuser-only.
+The `files` endpoints additionally accept a **project-scoped API key** (see
+[API keys](#api-keys-for-agents--ci)).
 
 ² `PUT /api/superuser` is allowed unauthenticated **only** for first-run setup
 (while no superuser exists); afterwards it requires a session.
+
+³ *owner* = a superuser or a collaborator granted that project. Key management is
+deliberately **not** reachable with an API key, so a leaked deploy key cannot
+mint further keys.
 
 ### API documentation (OpenAPI 3.1)
 
@@ -268,6 +277,35 @@ curl -s -b cj -X PUT http://127.0.0.1:8090/api/projects/alpha/files/content \
 curl -s http://alpha.localhost:8090/
 ```
 
+### API keys (for agents & CI)
+
+Editing files through the UI is convenient for humans, but agents and CI want a
+non-interactive credential. Each project can mint **project-scoped API keys**: a
+key authorizes exactly one project's `files` endpoints (and future deploy
+endpoints) and nothing else — never instance-wide operations, and never key
+management itself, so a leaked deploy key cannot escalate by minting more keys.
+
+Create and revoke keys from the **Files** view (the *API keys* card), or via the
+API. The raw token is shown **once**, at creation; only its SHA-256 hash is
+stored. Pass it as a bearer token:
+
+```bash
+# mint a key (owner session: superuser or granted collaborator)
+curl -s -b cj -X POST http://127.0.0.1:8090/api/projects/alpha/keys \
+  -H 'Content-Type: application/json' \
+  -d '{"label":"github-actions","expiresInDays":90}'
+# → {"id":"…","token":"av_…","label":"github-actions", …}   (copy the token now!)
+
+# an agent/CI then publishes with just the token — no cookie, no login
+curl -s -X PUT http://127.0.0.1:8090/api/projects/alpha/files/content \
+  -H 'Authorization: Bearer av_…' \
+  -H 'Content-Type: application/json' \
+  -d '{"path":"index.html","content":"<h1>shipped from CI</h1>"}'
+```
+
+Keys may carry an optional expiry (`expiresInDays`); omit it for a non-expiring
+key. Revoking a key (or deleting its project) invalidates it immediately.
+
 ### Passkeys (WebAuthn)
 
 Project users (records in each project's `users` collection) sign in with
@@ -323,6 +361,7 @@ control-plane SSO handoff to sign in.
 | `internal/aviary/superuser_passkey.go` | Superuser WebAuthn ceremonies (control plane) |
 | `internal/aviary/dashboard_sso.go`  | One-click dashboard SSO (ticket → minted token) |
 | `internal/aviary/files.go`          | Per-project pb_public file editor API (list/read/write/delete) |
+| `internal/aviary/apikeys.go`        | Project-scoped API keys (mint/list/revoke) + bearer auth |
 | `internal/aviary/openapi.go` + `openapi_control.go` + `openapi_project.go` | OpenAPI 3.1 specs (control plane + on-the-fly per project) |
 | `internal/aviary/collaborators.go` + `collaborator_api.go` | Invitations + project-scoped collaborators |
 | `internal/aviary/ui.go` + `web/`    | Embedded control-plane web UI                   |
@@ -331,6 +370,7 @@ control-plane SSO handoff to sign in.
 | `internal/passkey/`                 | Reusable per-project passkey/WebAuthn extension |
 | `internal/controlplane/store.go`    | Persistent project registry (SQLite)            |
 | `internal/controlplane/collaborators.go` | Collaborator + invitation persistence      |
+| `internal/controlplane/apikeys.go`  | API-key persistence (hashed tokens)             |
 
 ## Roadmap
 
@@ -346,4 +386,6 @@ control-plane SSO handoff to sign in.
 - [x] One-click dashboard SSO + disabled PocketBase password login (no brute-force surface)
 - [x] Auto-generated OpenAPI 3.1 specs (control plane + on-the-fly per project)
 - [x] Static file hosting per project (`pb_public`) + in-browser file editor + SPA fallback toggle
+- [x] Project-scoped API keys for agents/CI (bearer auth on the file/deploy endpoints)
+- [ ] Atomic archive deploy endpoint + GitHub Action (build in CI, push artifact)
 - [ ] Per-project quotas and metrics
