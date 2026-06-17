@@ -8,7 +8,7 @@
 #
 # Usage:
 #   AVIARY_URL=https://console.example.com \
-#   AVIARY_PROJECT=little-green-notebook \
+#   AVIARY_PROJECT=my-web-app \
 #   AVIARY_KEY=av_xxx \
 #   ./deploy.sh ./dist [--clean]
 #

@@ -337,9 +337,9 @@ tar -C dist -czf - . | curl -s -X POST \
 
 The [`examples/`](examples/) directory has a portable `deploy.sh` and a ready-to-copy
 [GitHub Actions workflow](examples/github-actions-deploy.yml) that builds a web app
-in CI and pushes the artifact to Aviary on every push to `main` — the
-little-green-notebook pattern: build in CI, deploy the static output, with the
-project's own cage as the PocketBase backend.
+in CI and pushes the artifact to Aviary on every push to `main` — the typical
+pattern: build in CI, deploy the static output, with the project's own cage as
+the PocketBase backend.
 
 ### Passkeys (WebAuthn)
 
