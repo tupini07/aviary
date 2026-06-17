@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net/http"
@@ -58,6 +60,8 @@ func main() {
 	seedProjects(av, *seed)
 	bootstrapSuperuser(av)
 
+	printHeader(os.Stdout, version)
+
 	slog.Info("Aviary up", "version", version, "addr", *addr, "data", *dataDir, "idleTTL", idleTTL.String())
 	slog.Info("control plane", "cmd", "curl -s http://"+*addr+"/")
 
@@ -71,7 +75,21 @@ func main() {
 	}
 }
 
-// seedProjects provisions a comma-separated list of project ids if they don't
+// printHeader writes an ASCII banner identifying Aviary and its build version
+// to out, giving operators an at-a-glance confirmation of what's running.
+func printHeader(out io.Writer, version string) {
+	const banner = `
+    _          _                  
+   / \   __   _(_) __ _ _ __ _   _ 
+  / _ \  \ \ / / |/ _' | '__| | | |
+ / ___ \  \ V /| | (_| | |  | |_| |
+/_/   \_\  \_/ |_|\__,_|_|   \__, |
+                             |___/ `
+	fmt.Fprintln(out, banner)
+	fmt.Fprintf(out, "  multi-tenant PocketBase control plane  •  %s\n\n", displayVersion(version))
+}
+
+
 // already exist. Intended only as a local-development convenience.
 func seedProjects(av *aviary.Aviary, seed string) {
 	for _, id := range strings.Split(seed, ",") {
