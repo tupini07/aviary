@@ -149,6 +149,8 @@
   .toggle { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 14px; line-height: 1.5; }
   .toggle input { width: auto; margin: 3px 0 0; flex: 0 0 auto; }
   .toggle span { color: var(--fg); }
+  .files-title { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .files-title h1 { margin: 0; }
 
   @media (max-width: 720px) {
     .files-layout { flex-direction: column; }
@@ -262,7 +264,10 @@
     <section class="view" data-view="files">
       <div class="view-head">
         <button id="fvBack" class="ghost" style="margin-bottom:10px">← Back to projects</button>
-        <h1>Files <span class="muted" id="fvProject" style="font-weight:400"></span></h1>
+        <div class="files-title">
+          <h1>Files <span class="muted" id="fvProject" style="font-weight:400"></span></h1>
+          <a id="fvVisit" class="btnlink" target="_blank" rel="noopener">Visit site ↗</a>
+        </div>
         <p>Edit the static files served from this project's <code>pb_public</code> directory at its public URL.</p>
       </div>
       <div class="card su-only" id="fvOptionsCard">
@@ -844,10 +849,35 @@ let fvState = { id: null, name: "", current: null };
 
 function fvSetError(msg) { $("fvErr").textContent = msg || ""; }
 
+// Mirror of projectHostFromControl (dashboard_sso.go): derive a project's public
+// origin from the control-plane host the dashboard was reached on.
+function projectOrigin(id) {
+  const proto = location.protocol; // "http:" / "https:"
+  const port = location.port ? ":" + location.port : "";
+  const hostname = location.hostname;
+  const reserved = { _console: true, www: true, _: true };
+  const isIPv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
+  let base;
+  if (isIPv4 || hostname.includes(":")) {
+    base = id + ".localhost"; // bare IP can't carry a subdomain label
+  } else {
+    const dot = hostname.indexOf(".");
+    if (dot === -1) {
+      base = id + "." + hostname; // bare host such as "localhost"
+    } else {
+      const label = hostname.slice(0, dot);
+      const rest = hostname.slice(dot + 1);
+      base = reserved[label] ? id + "." + rest : id + "." + hostname;
+    }
+  }
+  return `${proto}//${base}${port}`;
+}
+
 function openFiles(p) {
   fvState = { id: p.id, name: p.name || "", current: null };
   $("fvProject").textContent = `· ${p.id}`;
   $("fvSpa").checked = !!p.spa;
+  $("fvVisit").href = projectOrigin(p.id) + "/";
   fvClearEditor();
   fvSetError("");
   showView("files");
