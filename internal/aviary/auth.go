@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -149,6 +150,15 @@ func (a *Aviary) apiLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ok {
+		disabled, err := a.PasswordLoginEffectivelyDisabled(r.Context())
+		if err != nil {
+			a.apiError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if disabled {
+			a.apiError(w, http.StatusForbidden, "password login is disabled; sign in with a passkey")
+			return
+		}
 		email := strings.TrimSpace(strings.ToLower(req.Email))
 		a.setSessionCookie(w, r, email, roleSuperuser)
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "email": email, "role": roleSuperuser})
@@ -193,12 +203,40 @@ func (a *Aviary) apiSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email, role, _ := a.identity(r)
+	hasPasskeys, _ := a.store.HasSuperuserPasskeys(r.Context())
+	pwDisabled, _ := a.store.PasswordLoginDisabled(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"authenticated": email != "",
-		"email":         email,
-		"role":          role,
-		"configured":    configured,
+		"authenticated":         email != "",
+		"email":                 email,
+		"role":                  role,
+		"configured":            configured,
+		"hasPasskeys":           hasPasskeys,
+		"passwordLoginDisabled": pwDisabled,
 	})
+}
+
+// securityRequest toggles control-plane authentication hardening options.
+type securityRequest struct {
+	PasswordLoginDisabled bool `json:"passwordLoginDisabled"`
+}
+
+// apiPutSecurity updates the superuser authentication settings. Currently this
+// is the passkey-only toggle, which refuses to engage without an enrolled
+// passkey so the operator can never be locked out.
+func (a *Aviary) apiPutSecurity(w http.ResponseWriter, r *http.Request) {
+	var req securityRequest
+	if !decodeJSON(w, r, &req, a) {
+		return
+	}
+	if err := a.SetPasswordLoginDisabled(r.Context(), req.PasswordLoginDisabled); err != nil {
+		if errors.Is(err, ErrNoPasskeys) {
+			a.apiError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		a.apiError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"passwordLoginDisabled": req.PasswordLoginDisabled})
 }
 
 func (a *Aviary) setSessionCookie(w http.ResponseWriter, r *http.Request, email, role string) {

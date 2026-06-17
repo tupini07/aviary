@@ -218,6 +218,35 @@ func TestSetQuota(t *testing.T) {
 	}
 }
 
+func TestPasswordLoginDisabled(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Defaults to false when never set.
+	got, err := s.PasswordLoginDisabled(ctx)
+	if err != nil {
+		t.Fatalf("PasswordLoginDisabled: %v", err)
+	}
+	if got {
+		t.Fatalf("default PasswordLoginDisabled = true, want false")
+	}
+
+	if err := s.SetPasswordLoginDisabled(ctx, true); err != nil {
+		t.Fatalf("SetPasswordLoginDisabled(true): %v", err)
+	}
+	if got, _ := s.PasswordLoginDisabled(ctx); !got {
+		t.Errorf("after enable: PasswordLoginDisabled = false, want true")
+	}
+
+	// Idempotent upsert back to false.
+	if err := s.SetPasswordLoginDisabled(ctx, false); err != nil {
+		t.Fatalf("SetPasswordLoginDisabled(false): %v", err)
+	}
+	if got, _ := s.PasswordLoginDisabled(ctx); got {
+		t.Errorf("after disable: PasswordLoginDisabled = true, want false")
+	}
+}
+
 func TestDelete(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

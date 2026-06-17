@@ -371,5 +371,10 @@ func (a *Aviary) suPasskeyDelete(w http.ResponseWriter, r *http.Request) {
 		a.apiError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Fail-safe against lockout: if that was the last passkey, automatically
+	// re-enable password login so passkey-only mode can't strand the operator.
+	if has, err := a.store.HasSuperuserPasskeys(r.Context()); err == nil && !has {
+		_ = a.store.SetPasswordLoginDisabled(r.Context(), false)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }

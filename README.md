@@ -225,6 +225,7 @@ curl -s -b cj -i http://127.0.0.1:8090/api/projects/alpha/dashboard
 | `DELETE /api/collaborators/{email}` | superuser     | Remove a collaborator entirely   |
 | `POST /api/auth/passkey/login/*`  | public          | Superuser passwordless sign-in   |
 | `POST /api/auth/passkey/register/*` | superuser     | Enroll a superuser passkey       |
+| `PUT /api/auth/security`          | superuser       | Toggle passkey-only sign-in      |
 
 ¹ `GET /api/projects`, `GET /api/projects/{id}`, the dashboard SSO and the
 per-project `files` endpoints are available to collaborators too, but only for
@@ -430,6 +431,16 @@ API-locked `_passkeys` collection.
 The control-plane **superuser** can also register a passkey and sign in to the
 dashboard without a password — see the "Sign in with a passkey" button on the
 login screen and the Passkeys card once signed in.
+
+**Passkey-only sign-in.** Once at least one superuser passkey is enrolled, the
+Passkeys card exposes a *Passkey-only sign-in* toggle (`PUT /api/auth/security`
+with `{"passwordLoginDisabled": true}`). When enabled, the superuser's
+username/password login is refused (`403`) so a guessed or leaked password is
+useless on its own — only a passkey unlocks the account, shrinking the
+brute-force / credential-stuffing surface. As a lockout safeguard the toggle
+only engages while a passkey exists: removing your last passkey automatically
+re-enables password sign-in for recovery. (Project collaborators always sign in
+with a password; the toggle applies only to the superuser.)
 
 ### Collaborators & invitations
 

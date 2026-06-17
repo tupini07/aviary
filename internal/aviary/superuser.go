@@ -45,6 +45,43 @@ func (a *Aviary) SetSuperuser(ctx context.Context, email, password string) error
 	return nil
 }
 
+// ErrNoPasskeys is returned when passkey-only login would be enabled without any
+// enrolled superuser passkey, which would lock the operator out.
+var ErrNoPasskeys = errors.New("aviary: cannot disable password login without an enrolled passkey")
+
+// PasswordLoginDisabledFlag reports the stored superuser password-login toggle
+// as configured, regardless of whether any passkeys are currently enrolled.
+func (a *Aviary) PasswordLoginDisabledFlag(ctx context.Context) (bool, error) {
+	return a.store.PasswordLoginDisabled(ctx)
+}
+
+// PasswordLoginEffectivelyDisabled reports whether superuser password login is
+// actually blocked right now. As a lockout safeguard the toggle only takes
+// effect while at least one superuser passkey is enrolled, so removing every
+// passkey transparently restores password login for account recovery.
+func (a *Aviary) PasswordLoginEffectivelyDisabled(ctx context.Context) (bool, error) {
+	flag, err := a.store.PasswordLoginDisabled(ctx)
+	if err != nil || !flag {
+		return false, err
+	}
+	return a.store.HasSuperuserPasskeys(ctx)
+}
+
+// SetPasswordLoginDisabled toggles passkey-only sign-in for the superuser.
+// Enabling it requires at least one enrolled superuser passkey to avoid lockout.
+func (a *Aviary) SetPasswordLoginDisabled(ctx context.Context, disabled bool) error {
+	if disabled {
+		has, err := a.store.HasSuperuserPasskeys(ctx)
+		if err != nil {
+			return err
+		}
+		if !has {
+			return ErrNoPasskeys
+		}
+	}
+	return a.store.SetPasswordLoginDisabled(ctx, disabled)
+}
+
 // GetSuperuser returns the control-plane superuser, or ErrNoSuperuser.
 func (a *Aviary) GetSuperuser(ctx context.Context) (*Superuser, error) {
 	return a.store.GetSuperuser(ctx)

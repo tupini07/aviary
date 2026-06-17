@@ -27,6 +27,9 @@ func (a *Aviary) controlHandler() http.Handler {
 	mux.HandleFunc("GET /api/auth/passkey", a.requireSuperuser(a.suPasskeyList))
 	mux.HandleFunc("DELETE /api/auth/passkey/{id}", a.requireSuperuser(a.suPasskeyDelete))
 
+	// Superuser authentication hardening (passkey-only sign-in toggle).
+	mux.HandleFunc("PUT /api/auth/security", a.requireSuperuser(a.apiPutSecurity))
+
 	// Project lifecycle. Listing/reading is available to any authenticated
 	// identity (filtered by access); mutations are superuser-only.
 	mux.HandleFunc("GET /api/projects", a.requireAuth(a.apiListProjects))

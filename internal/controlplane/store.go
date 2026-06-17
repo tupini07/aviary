@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -411,6 +412,47 @@ func (s *Store) SessionKey(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("controlplane: persist session key: %w", err)
 	}
 	return buf, nil
+}
+
+// kvGet reads a raw key/value setting. The second result reports presence.
+func (s *Store) kvGet(ctx context.Context, key string) (string, bool, error) {
+	var val string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM kv WHERE key = ?`, key).Scan(&val)
+	switch {
+	case err == nil:
+		return val, true, nil
+	case errors.Is(err, sql.ErrNoRows):
+		return "", false, nil
+	default:
+		return "", false, fmt.Errorf("controlplane: read kv %q: %w", key, err)
+	}
+}
+
+// kvSet upserts a raw key/value setting.
+func (s *Store) kvSet(ctx context.Context, key, value string) error {
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO kv (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value); err != nil {
+		return fmt.Errorf("controlplane: write kv %q: %w", key, err)
+	}
+	return nil
+}
+
+const kvPasswordLoginDisabled = "superuser_password_login_disabled"
+
+// PasswordLoginDisabled reports the stored superuser password-login toggle. When
+// true, the operator has opted into passkey-only sign-in for the superuser.
+func (s *Store) PasswordLoginDisabled(ctx context.Context) (bool, error) {
+	val, _, err := s.kvGet(ctx, kvPasswordLoginDisabled)
+	if err != nil {
+		return false, err
+	}
+	return val == "1", nil
+}
+
+// SetPasswordLoginDisabled persists the superuser password-login toggle.
+func (s *Store) SetPasswordLoginDisabled(ctx context.Context, disabled bool) error {
+	return s.kvSet(ctx, kvPasswordLoginDisabled, strconv.Itoa(boolToInt(disabled)))
 }
 
 const timeLayout = time.RFC3339Nano

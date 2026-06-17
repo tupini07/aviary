@@ -509,6 +509,12 @@
           <div style="flex:0 0 auto"><button id="pkAdd" class="secondary">Register a passkey</button></div>
         </div>
         <div class="err" id="pkErr"></div>
+        <hr style="border:none; border-top:1px solid var(--border); margin:18px 0" />
+        <label class="toggle">
+          <input type="checkbox" id="pwDisable" />
+          <span><strong>Passkey-only sign-in</strong> — disable username &amp; password sign-in for the superuser so the account can only be unlocked with a passkey. Hardens against brute-force and credential-stuffing. Requires at least one registered passkey; removing your last passkey re-enables password sign-in automatically.</span>
+        </label>
+        <div class="err" id="pwErr"></div>
       </div>
     </section>
 
@@ -836,6 +842,18 @@ async function loadPasskeys() {
     tr.append(tdLabel, tdCreated, tdAct);
     body.append(tr);
   }
+  // Passkey-only sign-in can only be engaged when a passkey exists; reflect the
+  // stored toggle and disable it (with a hint) when there are none.
+  const pw = $("pwDisable");
+  if (list.length === 0) {
+    // Server auto-clears the flag when the last passkey is removed.
+    state.passwordLoginDisabled = false;
+  }
+  pw.checked = !!state.passwordLoginDisabled;
+  pw.disabled = list.length === 0;
+  $("pwErr").textContent = list.length === 0
+    ? "Register a passkey to enable passkey-only sign-in."
+    : "";
 }
 
 async function loadProjects() {
@@ -1342,6 +1360,16 @@ $("fvSpa").addEventListener("change", async (e) => {
     e.target.checked = !e.target.checked; // revert on failure
     $("fvSpaErr").textContent = (res.data && res.data.error) || "Failed to update SPA mode.";
   }
+});
+$("pwDisable").addEventListener("change", async (e) => {
+  $("pwErr").textContent = "";
+  const res = await api("PUT", "/api/auth/security", { passwordLoginDisabled: e.target.checked });
+  if (!res.ok) {
+    e.target.checked = !e.target.checked; // revert on failure
+    $("pwErr").textContent = (res.data && res.data.error) || "Failed to update sign-in settings.";
+    return;
+  }
+  state.passwordLoginDisabled = e.target.checked;
 });
 $("fvDelProject").addEventListener("click", async () => {
   $("fvDelProjectErr").textContent = "";

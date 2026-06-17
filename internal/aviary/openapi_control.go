@@ -59,6 +59,7 @@ func controlOpenAPI(serverURL string) oa {
 				"responses": oa{
 					"200": oa{"description": "Session established (sets the aviary_session cookie)", "content": jsonBody(ref("Session"))["content"]},
 					"401": errResp("Invalid credentials"),
+					"403": errResp("Password login is disabled; sign in with a passkey"),
 				},
 			},
 		},
@@ -112,6 +113,18 @@ func controlOpenAPI(serverURL string) oa {
 				"tags": []any{"passkey"}, "summary": "Delete a superuser passkey",
 				"parameters": []any{oa{"name": "id", "in": "path", "required": true, "description": "Credential id of the passkey.", "schema": oa{"type": "string"}}},
 				"responses":  oa{"204": oa{"description": "Deleted"}, "401": errResp("Authentication required")},
+			},
+		},
+		"/api/auth/security": oa{
+			"put": oa{
+				"tags": []any{"auth"}, "summary": "Update superuser authentication settings",
+				"description": "Toggle passkey-only sign-in for the superuser. Enabling it requires at least one enrolled passkey; otherwise the request is rejected to prevent lockout.",
+				"requestBody": jsonBody(ref("SecuritySettings")),
+				"responses": oa{
+					"200": oa{"description": "Settings updated", "content": jsonBody(ref("SecuritySettings"))["content"]},
+					"400": errResp("Cannot enable passkey-only sign-in without an enrolled passkey"),
+					"401": errResp("Authentication required"),
+				},
 			},
 		},
 		"/api/projects": oa{
@@ -333,10 +346,12 @@ func controlOpenAPI(serverURL string) oa {
 				"Session": oa{
 					"type": "object",
 					"properties": oa{
-						"authenticated": oa{"type": "boolean"},
-						"configured":    oa{"type": "boolean", "description": "Whether a superuser exists yet."},
-						"email":         oa{"type": "string"},
-						"role":          oa{"type": "string", "enum": []any{"superuser", "collaborator"}},
+						"authenticated":         oa{"type": "boolean"},
+						"configured":            oa{"type": "boolean", "description": "Whether a superuser exists yet."},
+						"email":                 oa{"type": "string"},
+						"role":                  oa{"type": "string", "enum": []any{"superuser", "collaborator"}},
+						"hasPasskeys":           oa{"type": "boolean", "description": "Whether the superuser has at least one passkey enrolled."},
+						"passwordLoginDisabled": oa{"type": "boolean", "description": "Whether superuser username/password sign-in is disabled (passkey-only)."},
 					},
 				},
 				"Project": oa{
@@ -381,6 +396,13 @@ func controlOpenAPI(serverURL string) oa {
 						"label":        oa{"type": "string"},
 						"created":      oa{"type": "string", "format": "date-time"},
 					},
+				},
+				"SecuritySettings": oa{
+					"type": "object",
+					"properties": oa{
+						"passwordLoginDisabled": oa{"type": "boolean", "description": "When true, the superuser can only sign in with a passkey."},
+					},
+					"required": []any{"passwordLoginDisabled"},
 				},
 				"Collaborator": oa{
 					"type": "object",
