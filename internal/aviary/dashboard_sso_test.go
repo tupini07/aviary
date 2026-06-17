@@ -104,8 +104,11 @@ func TestDashboardSSOFlow(t *testing.T) {
 		t.Fatalf("ticket redemption = %d, want 200 (body: %s)", ssoRec.Code, ssoRec.Body.String())
 	}
 	body := ssoRec.Body.String()
+	if !strings.Contains(body, `__pb_superusers__/_`) {
+		t.Fatalf("bootstrap page missing __pb_superusers__ seed: %s", body)
+	}
 	if !strings.Contains(body, "pocketbase_auth") {
-		t.Fatalf("bootstrap page missing pocketbase_auth seed: %s", body)
+		t.Fatalf("bootstrap page missing pocketbase_auth fallback seed: %s", body)
 	}
 
 	// Step 3: a ticket is single-use; a second redemption must be rejected.

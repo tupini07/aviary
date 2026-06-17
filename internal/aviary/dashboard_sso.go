@@ -205,11 +205,19 @@ func (a *Aviary) handleProjectSSO(w http.ResponseWriter, r *http.Request, id str
 	fmt.Fprintf(w, ssoBootstrapHTML, auth)
 }
 
-// ssoBootstrapHTML seeds the PocketBase admin dashboard's auth store (localStorage
-// key "pocketbase_auth") with the minted credential, then redirects to the
-// dashboard already logged in.
+// ssoBootstrapHTML seeds the PocketBase admin dashboard's auth store with the
+// minted credential, then redirects to the dashboard already logged in.
+//
+// PocketBase's admin UI (v0.39) stores its auth under the localStorage key
+// "__pb_superusers__" + window.location.pathname (trailing slash stripped). The
+// dashboard is served at /_/, so that key resolves to "__pb_superusers__/_".
+// We also write the legacy "pocketbase_auth" key as a harmless fallback for
+// other/older PocketBase builds. The stored value is {token, record}, which is
+// exactly what the auth store reads back.
 const ssoBootstrapHTML = `<!doctype html><html><head><meta charset="utf-8"><title>Opening dashboard…</title></head>` +
-	`<body><script>try{localStorage.setItem("pocketbase_auth",JSON.stringify(%s));}catch(e){}` +
+	`<body><script>try{var a=JSON.stringify(%s);` +
+	`localStorage.setItem("__pb_superusers__/_",a);` +
+	`localStorage.setItem("pocketbase_auth",a);}catch(e){}` +
 	`location.replace("/_/");</script>Opening dashboard…</body></html>`
 
 // projectSSOURL builds the absolute URL of a project's SSO handoff endpoint,
