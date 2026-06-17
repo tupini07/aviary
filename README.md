@@ -94,7 +94,7 @@ Two GitHub workflows automate this:
 - **Release** (`.github/workflows/release.yml`) runs [GoReleaser] on every
   pushed `v*` tag. It cross-compiles binaries for Linux, macOS and Windows
   (amd64/arm64/arm) and publishes a GitHub Release with zip archives and a
-  `checksums.txt`, much like PocketBase's releases.
+  `checksums.txt`.
 
 Cutting a release is just pushing a tag:
 
@@ -424,4 +424,5 @@ control-plane SSO handoff to sign in.
 - [x] Static file hosting per project (`pb_public`) + in-browser file editor + SPA fallback toggle
 - [x] Project-scoped API keys for agents/CI (bearer auth on the file/deploy endpoints)
 - [x] Atomic archive deploy endpoint + GitHub Action (build in CI, push artifact)
+- [ ] Self-update command (`aviary update` — download + verify the matching GitHub release, atomic binary swap)
 - [ ] Per-project quotas and metrics
