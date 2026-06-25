@@ -42,6 +42,11 @@ func controlOpenAPI(serverURL string) oa {
 		"description": "API key id (the public identifier, not the secret token).",
 		"schema":      oa{"type": "string"},
 	}
+	hookPathParam := oa{
+		"name": "path", "in": "query", "required": true,
+		"description": "File path relative to pb_hooks, forward-slash separated. PocketBase loads files matching *.pb.js as hook entrypoints (e.g. main.pb.js).",
+		"schema":      oa{"type": "string"},
+	}
 
 	paths := oa{
 		"/api/openapi.json": oa{
@@ -213,6 +218,34 @@ func controlOpenAPI(serverURL string) oa {
 				"responses":  oa{"204": oa{"description": "Deleted"}, "400": errResp("Invalid path"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("File not found")},
 			},
 		},
+		"/api/projects/{id}/hooks": oa{
+			"get": oa{
+				"tags": []any{"hooks"}, "summary": "List a project's JS hook files (pb_hooks)",
+				"description": "Lists every file under the project's pb_hooks directory. Owner-only (superuser or granted collaborator); project-scoped API keys are rejected because hook files run server-side.",
+				"parameters":  []any{idParam},
+				"responses":   oa{"200": oa{"description": "Flat, sorted file listing", "content": jsonBody(oa{"type": "array", "items": ref("FileEntry")})["content"]}, "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found")},
+			},
+		},
+		"/api/projects/{id}/hooks/content": oa{
+			"get": oa{
+				"tags": []any{"hooks"}, "summary": "Read a single pb_hooks file",
+				"parameters": []any{idParam, hookPathParam},
+				"responses":  oa{"200": oa{"description": "File content", "content": jsonBody(ref("FileContent"))["content"]}, "400": errResp("Invalid path"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("File not found"), "413": errResp("File is too large to edit")},
+			},
+			"put": oa{
+				"tags": []any{"hooks"}, "summary": "Create or overwrite a pb_hooks file",
+				"description": "Creates any missing parent directories. The project is rebooted after the write so the new hooks take effect on its next request. Owner-only; API keys are rejected.",
+				"parameters":  []any{idParam},
+				"requestBody": jsonBody(ref("FileContent")),
+				"responses":   oa{"200": oa{"description": "File written", "content": jsonBody(ref("FileEntry"))["content"]}, "400": errResp("Invalid path"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found"), "413": errResp("Content is too large")},
+			},
+			"delete": oa{
+				"tags": []any{"hooks"}, "summary": "Delete a single pb_hooks file",
+				"description": "The project is rebooted after the delete so the removed hook no longer runs. Owner-only; API keys are rejected.",
+				"parameters":  []any{idParam, hookPathParam},
+				"responses":   oa{"204": oa{"description": "Deleted"}, "400": errResp("Invalid path"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("File not found")},
+			},
+		},
 		"/api/projects/{id}/deploy": oa{
 			"post": oa{
 				"tags": []any{"files"}, "summary": "Deploy a built site archive into pb_public",
@@ -320,6 +353,7 @@ func controlOpenAPI(serverURL string) oa {
 			oa{"name": "passkey", "description": "WebAuthn passkeys"},
 			oa{"name": "projects", "description": "Project (cage) lifecycle"},
 			oa{"name": "files", "description": "Per-project static files (pb_public)"},
+			oa{"name": "hooks", "description": "Per-project JS hooks (pb_hooks); owner-only, reboots the project on change"},
 			oa{"name": "keys", "description": "Per-project API keys for agents/CI"},
 			oa{"name": "superuser", "description": "Platform superuser"},
 			oa{"name": "collaborators", "description": "Per-project collaborators"},

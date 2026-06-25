@@ -243,6 +243,10 @@ curl -s -b cj -i http://127.0.0.1:8090/api/projects/alpha/dashboard
 | `GET /api/projects/{id}/files/content?path=…` | any¹ | Read a pb_public file            |
 | `PUT /api/projects/{id}/files/content` | any¹       | Create/overwrite a pb_public file |
 | `DELETE /api/projects/{id}/files/content?path=…` | any¹ | Delete a pb_public file       |
+| `GET /api/projects/{id}/hooks`    | owner³          | List the project's pb_hooks (JS) files |
+| `GET /api/projects/{id}/hooks/content?path=…` | owner³ | Read a pb_hooks file            |
+| `PUT /api/projects/{id}/hooks/content` | owner³     | Create/overwrite a pb_hooks file (reboots the project) |
+| `DELETE /api/projects/{id}/hooks/content?path=…` | owner³ | Delete a pb_hooks file (reboots the project) |
 | `POST /api/projects/{id}/deploy`  | any¹            | Atomically deploy a `.tar.gz`/`.zip` into pb_public |
 | `GET /api/projects/{id}/keys`     | owner³          | List a project's API keys        |
 | `POST /api/projects/{id}/keys`    | owner³          | Mint a project-scoped API key (token shown once) |
@@ -267,9 +271,9 @@ The `files` endpoints additionally accept a **project-scoped API key** (see
 ² `PUT /api/superuser` is allowed unauthenticated **only** for first-run setup
 (while no superuser exists); afterwards it requires a session.
 
-³ *owner* = a superuser or a collaborator granted that project. Key management is
-deliberately **not** reachable with an API key, so a leaked deploy key cannot
-mint further keys.
+³ *owner* = a superuser or a collaborator granted that project. Key management
+and the `hooks` editor are deliberately **not** reachable with an API key — a
+leaked deploy key cannot mint further keys or write server-side code.
 
 ### API documentation (OpenAPI 3.1)
 
@@ -408,6 +412,42 @@ in CI and pushes the artifact to Aviary on every push to `main` — the typical
 pattern: build in CI, deploy the static output, with the project's own cage as
 the PocketBase backend.
 
+### JS hooks (pb_hooks)
+
+Each project can extend its PocketBase backend with
+[JavaScript hooks](https://pocketbase.io/docs/js-overview/). Files placed in a
+project's `pb_hooks` directory and matching `*.pb.js` are loaded as hook
+entrypoints — register event hooks (`onRecordCreate`, …), custom routes
+(`routerAdd`), and more. Edit them from the **Hooks** tab in a project's
+workspace, or via the API:
+
+```bash
+# add a custom route handler (owner session: superuser or granted collaborator)
+curl -sb cookies.txt -X PUT \
+  -H 'content-type: application/json' \
+  --data '{"path":"main.pb.js","content":"routerAdd(\"GET\", \"/hello\", (e) => e.json(200, {msg: \"hi\"}))"}' \
+  http://127.0.0.1:8090/api/projects/alpha/hooks/content
+
+# it is now served by the project's cage
+curl https://alpha.<host>/hello   # → {"msg":"hi"}
+```
+
+Notes:
+
+- **Owner-only.** Hooks run server-side, so the editor accepts a superuser or
+  granted-collaborator session but **rejects project-scoped API keys** — a leaked
+  deploy key cannot inject backend code.
+- **Edits reboot the project.** Saving or deleting a hook evicts the project's
+  cage so it reboots and re-runs the hooks on its next request. A project with no
+  hook files pays no cost (the JS runtime self-disables).
+- **Full host trust.** PocketBase's JS bindings expose host capabilities
+  (`$os.cmd`, filesystem, …) and run in the Aviary process. This is fine for the
+  single-operator model Aviary targets (you manage all your own projects); it is
+  **not** a sandbox for untrusted third-party code.
+- **For scheduled work, prefer control-plane cron** (planned, see the roadmap)
+  over in-hook `cronAdd()`: a project's own cron stops when its idle cage is
+  evicted, whereas control-plane cron jobs wake the project on demand.
+
 ### Storage quotas & metrics
 
 Each project exposes a usage snapshot at `GET /api/projects/{id}/metrics`
@@ -504,7 +544,8 @@ control-plane login page first if you have no session).
 | `internal/aviary/superuser_propagation.go` | Propagate superuser into each project    |
 | `internal/aviary/superuser_passkey.go` | Superuser WebAuthn ceremonies (control plane) |
 | `internal/aviary/dashboard_sso.go`  | One-click dashboard SSO (ticket → minted token) |
-| `internal/aviary/files.go`          | Per-project pb_public file editor API (list/read/write/delete) |
+| `internal/aviary/files.go`          | Per-project pb_public + pb_hooks file editor API (list/read/write/delete) |
+| `internal/aviary/hooks.go`          | Per-project pb_hooks (JS hooks) editor API (owner-only; reboots on change) |
 | `internal/aviary/deploy.go`         | Atomic archive deploy (.tar.gz/.zip → pb_public swap) |
 | `internal/aviary/metrics.go`        | Per-project storage metrics + pb_public quota enforcement |
 | `internal/aviary/apikeys.go`        | Project-scoped API keys (mint/list/revoke) + bearer auth |
@@ -536,3 +577,5 @@ control-plane login page first if you have no session).
 - [x] Atomic archive deploy endpoint + GitHub Action (build in CI, push artifact)
 - [x] Self-update command (`aviary update` — download + verify the matching GitHub release, atomic binary swap)
 - [x] Per-project storage quotas and metrics (pb_public usage + quota enforcement on write/deploy)
+- [x] Per-project JS hooks (`pb_hooks`) editor — owner-only, reboots the project on change
+- [ ] Control-plane cron scheduler (wakes idle projects on demand to run scheduled jobs)

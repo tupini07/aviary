@@ -57,6 +57,15 @@ func (a *Aviary) controlHandler() http.Handler {
 	mux.HandleFunc("PUT /api/projects/{id}/files/content", a.requireAuth(a.apiWriteFile))
 	mux.HandleFunc("DELETE /api/projects/{id}/files/content", a.requireAuth(a.apiDeleteFile))
 
+	// JS hooks editor for each project's pb_hooks directory. Editing hooks
+	// changes server-side behavior, so this is owner-only (superuser or granted
+	// collaborator) and rejects project-scoped API keys, and a write/delete
+	// reboots the project so the new hooks take effect.
+	mux.HandleFunc("GET /api/projects/{id}/hooks", a.requireAuth(a.apiListHooks))
+	mux.HandleFunc("GET /api/projects/{id}/hooks/content", a.requireAuth(a.apiReadHook))
+	mux.HandleFunc("PUT /api/projects/{id}/hooks/content", a.requireAuth(a.apiWriteHook))
+	mux.HandleFunc("DELETE /api/projects/{id}/hooks/content", a.requireAuth(a.apiDeleteHook))
+
 	// Bulk atomic deploy: publish a built site (tar.gz/zip) into pb_public in a
 	// single swap. Same auth as the file endpoints (cookie or API key).
 	mux.HandleFunc("POST /api/projects/{id}/deploy", a.requireAuth(a.apiDeployProject))

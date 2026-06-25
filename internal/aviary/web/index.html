@@ -292,6 +292,7 @@
       <button type="button" class="nav-item" id="pnBack"><span class="ico">←</span> All projects</button>
       <div class="nav-label" id="pnLabel"></div>
       <button type="button" class="nav-item current" data-subview="fvFiles"><span class="ico">▤</span> Files</button>
+      <button type="button" class="nav-item" data-subview="fvHooks"><span class="ico">⚡</span> Hooks</button>
       <button type="button" class="nav-item" data-subview="fvKeys"><span class="ico">⚿</span> API keys</button>
       <button type="button" class="nav-item su-only" data-subview="fvSettings"><span class="ico">⚙</span> Settings</button>
       <div class="nav-sep"></div>
@@ -364,6 +365,40 @@
               </div>
               <textarea id="fvContent" spellcheck="false" placeholder="Select a file on the left, or create one to start editing." disabled></textarea>
               <div class="err" id="fvErr"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hooks sub-view -->
+      <div class="subview" data-subview="fvHooks">
+        <div class="card">
+          <p class="muted" style="font-size:13px; margin:0 0 14px">
+            Extend this project's backend with PocketBase <a href="https://pocketbase.io/docs/js-overview/" target="_blank" rel="noopener">JS hooks</a>.
+            Files in <code>pb_hooks</code> matching <code>*.pb.js</code> are loaded as hook entrypoints — register event hooks,
+            custom routes, or scheduled handlers. Saving a hook <strong>reboots the project</strong> so the change takes effect.
+            For reliable scheduled work, pair a <code>routerAdd("POST", "/cron/…")</code> route with a control-plane cron job.
+          </p>
+          <div class="files-layout">
+            <div class="files-aside">
+              <div class="files-aside-head"><strong>pb_hooks</strong></div>
+              <ul id="hkList" class="files-list"></ul>
+              <div class="empty hidden" id="hkEmpty">No hooks yet.</div>
+              <div class="row" style="margin-top:12px">
+                <div><input id="hkNewPath" placeholder="main.pb.js" /></div>
+                <div style="flex:0 0 auto"><button id="hkNew" class="secondary">New</button></div>
+              </div>
+            </div>
+            <div class="files-main">
+              <div class="files-main-head">
+                <input id="hkPath" readonly placeholder="select or create a hook file" />
+                <div class="actions">
+                  <button id="hkSave" disabled>Save</button>
+                  <button id="hkDelete" class="danger" disabled>Delete</button>
+                </div>
+              </div>
+              <textarea id="hkContent" spellcheck="false" placeholder="Select a hook file on the left, or create one (e.g. main.pb.js) to start editing." disabled></textarea>
+              <div class="err" id="hkErr"></div>
             </div>
           </div>
         </div>
@@ -1178,8 +1213,105 @@ for (const t of document.querySelectorAll("#projectNav .nav-item[data-subview]")
 }
 $("pnBack").addEventListener("click", () => showView("projects"));
 
-function fvSetError(msg) { $("fvErr").textContent = msg || ""; }
+// makeFileEditor builds a self-contained file editor (list + textarea) bound to
+// a project sub-resource root ("files" -> pb_public, "hooks" -> pb_hooks). Both
+// editors share the per-project endpoint shape, so the only differences are the
+// REST root and the DOM element ids they drive. The project id always comes from
+// fvState.id (set by openFiles).
+function makeFileEditor(opts) {
+  const ids = opts.ids;
+  let current = null;
+  const el = (k) => $(ids[k]);
 
+  function setError(msg) { el("err").textContent = msg || ""; }
+
+  function clear() {
+    current = null;
+    el("path").value = "";
+    el("content").value = "";
+    el("content").disabled = true;
+    el("save").disabled = true;
+    el("del").disabled = true;
+  }
+
+  async function load() {
+    const res = await api("GET", `/api/projects/${fvState.id}/${opts.root}`);
+    const list = el("list");
+    list.innerHTML = "";
+    if (!res.ok) { setError((res.data && res.data.error) || "Failed to load files."); return; }
+    const files = Array.isArray(res.data) ? res.data : [];
+    el("empty").classList.toggle("hidden", files.length !== 0);
+    for (const f of files) {
+      const li = document.createElement("li");
+      li.textContent = f.path;
+      li.title = `${f.path} · ${f.size} bytes`;
+      if (f.path === current) li.classList.add("current");
+      li.onclick = () => open(f.path);
+      list.append(li);
+    }
+  }
+
+  async function open(path) {
+    setError("");
+    const res = await api("GET", `/api/projects/${fvState.id}/${opts.root}/content?path=${encodeURIComponent(path)}`);
+    if (!res.ok) { setError((res.data && res.data.error) || "Failed to open file."); return; }
+    current = res.data.path;
+    el("path").value = res.data.path;
+    el("content").value = res.data.content;
+    el("content").disabled = false;
+    el("save").disabled = false;
+    el("del").disabled = false;
+    for (const li of el("list").children) li.classList.toggle("current", li.textContent === current);
+  }
+
+  async function save() {
+    if (!current) return;
+    setError("");
+    const res = await api("PUT", `/api/projects/${fvState.id}/${opts.root}/content`, {
+      path: current, content: el("content").value,
+    });
+    if (!res.ok) { setError((res.data && res.data.error) || "Failed to save file."); return; }
+    await load();
+  }
+
+  async function del() {
+    if (!current) return;
+    if (!confirm(`Delete "${current}"?`)) return;
+    setError("");
+    const res = await api("DELETE", `/api/projects/${fvState.id}/${opts.root}/content?path=${encodeURIComponent(current)}`);
+    if (!res.ok) { setError((res.data && res.data.error) || "Failed to delete file."); return; }
+    clear();
+    await load();
+  }
+
+  async function create() {
+    const path = el("newPath").value.trim();
+    if (!path) { setError(opts.newError); return; }
+    setError("");
+    const res = await api("PUT", `/api/projects/${fvState.id}/${opts.root}/content`, { path, content: "" });
+    if (!res.ok) { setError((res.data && res.data.error) || "Failed to create file."); return; }
+    el("newPath").value = "";
+    await load();
+    await open(res.data.path);
+    el("content").focus();
+  }
+
+  el("save").addEventListener("click", save);
+  el("del").addEventListener("click", del);
+  el("new").addEventListener("click", create);
+  el("newPath").addEventListener("keydown", (e) => { if (e.key === "Enter") create(); });
+
+  return { load, clear };
+}
+
+const filesEditor = makeFileEditor({
+  root: "files", newError: "Enter a file path, e.g. index.html",
+  ids: { list: "fvList", empty: "fvEmpty", newPath: "fvNewPath", new: "fvNew", path: "fvPath", save: "fvSave", del: "fvDelete", content: "fvContent", err: "fvErr" },
+});
+const hooksEditor = makeFileEditor({
+  root: "hooks", newError: "Enter a file path, e.g. main.pb.js",
+  ids: { list: "hkList", empty: "hkEmpty", newPath: "hkNewPath", new: "hkNew", path: "hkPath", save: "hkSave", del: "hkDelete", content: "hkContent", err: "hkErr" },
+});
 // Mirror of projectHostFromControl (dashboard_sso.go): derive a project's public
 // origin from the control-plane host the dashboard was reached on.
 function projectOrigin(id) {
@@ -1217,93 +1349,18 @@ function openFiles(p) {
   // The dashboard only boots for active projects; dim the link otherwise.
   dash.classList.toggle("disabled", p.status !== "active");
 
-  fvClearEditor();
-  fvSetError("");
+  filesEditor.clear();
+  hooksEditor.clear();
   $("fvKeyReveal").classList.add("hidden");
   $("fvKeysErr").textContent = "";
   $("fvDelProjectErr").textContent = "";
   showFilesTab("fvFiles");
   showView("files");
-  loadFiles();
+  filesEditor.load();
+  hooksEditor.load();
   loadKeys();
   loadMetrics();
 }
-
-function fvClearEditor() {
-  fvState.current = null;
-  $("fvPath").value = "";
-  $("fvContent").value = "";
-  $("fvContent").disabled = true;
-  $("fvSave").disabled = true;
-  $("fvDelete").disabled = true;
-}
-
-async function loadFiles() {
-  const res = await api("GET", `/api/projects/${fvState.id}/files`);
-  const list = $("fvList");
-  list.innerHTML = "";
-  if (!res.ok) { fvSetError((res.data && res.data.error) || "Failed to load files."); return; }
-  const files = Array.isArray(res.data) ? res.data : [];
-  $("fvEmpty").classList.toggle("hidden", files.length !== 0);
-  for (const f of files) {
-    const li = document.createElement("li");
-    li.textContent = f.path;
-    li.title = `${f.path} · ${f.size} bytes`;
-    if (f.path === fvState.current) li.classList.add("current");
-    li.onclick = () => openFile(f.path);
-    list.append(li);
-  }
-}
-
-async function openFile(path) {
-  fvSetError("");
-  const res = await api("GET", `/api/projects/${fvState.id}/files/content?path=${encodeURIComponent(path)}`);
-  if (!res.ok) { fvSetError((res.data && res.data.error) || "Failed to open file."); return; }
-  fvState.current = res.data.path;
-  $("fvPath").value = res.data.path;
-  $("fvContent").value = res.data.content;
-  $("fvContent").disabled = false;
-  $("fvSave").disabled = false;
-  $("fvDelete").disabled = false;
-  for (const li of $("fvList").children) li.classList.toggle("current", li.textContent === fvState.current);
-}
-
-async function saveFile() {
-  if (!fvState.current) return;
-  fvSetError("");
-  const res = await api("PUT", `/api/projects/${fvState.id}/files/content`, {
-    path: fvState.current, content: $("fvContent").value,
-  });
-  if (!res.ok) { fvSetError((res.data && res.data.error) || "Failed to save file."); return; }
-  await loadFiles();
-}
-
-async function deleteFile() {
-  if (!fvState.current) return;
-  if (!confirm(`Delete "${fvState.current}"?`)) return;
-  fvSetError("");
-  const res = await api("DELETE", `/api/projects/${fvState.id}/files/content?path=${encodeURIComponent(fvState.current)}`);
-  if (!res.ok) { fvSetError((res.data && res.data.error) || "Failed to delete file."); return; }
-  fvClearEditor();
-  await loadFiles();
-}
-
-async function newFile() {
-  const path = $("fvNewPath").value.trim();
-  if (!path) { fvSetError("Enter a file path, e.g. index.html"); return; }
-  fvSetError("");
-  const res = await api("PUT", `/api/projects/${fvState.id}/files/content`, { path, content: "" });
-  if (!res.ok) { fvSetError((res.data && res.data.error) || "Failed to create file."); return; }
-  $("fvNewPath").value = "";
-  await loadFiles();
-  await openFile(res.data.path);
-  $("fvContent").focus();
-}
-
-$("fvSave").addEventListener("click", saveFile);
-$("fvDelete").addEventListener("click", deleteFile);
-$("fvNew").addEventListener("click", newFile);
-$("fvNewPath").addEventListener("keydown", (e) => { if (e.key === "Enter") newFile(); });
 
 function fmtDate(s) { return s ? new Date(s).toLocaleString() : ""; }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/plugins/jsvm"
 
 	"github.com/tupini07/aviary/internal/passkey"
 )
@@ -57,6 +58,16 @@ func (c *cage) start(projectsDir string, log *slog.Logger) error {
 		_ = app.ResetBootstrapState()
 		return err
 	}
+
+	// Enable PocketBase JS hooks from the project's pb_hooks directory. The
+	// jsvm plugin self-disables when no *.pb.js hook files exist, so projects
+	// without hooks pay no cost. HooksWatch is off because Aviary reloads hooks
+	// by evicting the cage (it reboots and re-runs the hooks on next request),
+	// which avoids a per-project filesystem watcher.
+	jsvm.MustRegister(app, jsvm.Config{
+		HooksDir:   filepath.Join(dir, "pb_hooks"),
+		HooksWatch: false,
+	})
 
 	// Unless explicitly allowed, reject PocketBase's native superuser password
 	// login so the dashboard is reachable only via an Aviary-minted token. This

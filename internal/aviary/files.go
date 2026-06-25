@@ -73,6 +73,14 @@ func (a *Aviary) projectPublicDir(id string) string {
 	return filepath.Join(a.projectsDir, id, "pb_public")
 }
 
+// projectHooksDir returns the absolute path of a project's pb_hooks directory,
+// where PocketBase JS hook files (*.pb.js) live. Editing files here changes the
+// project's server-side behavior, so the hooks editor is owner-only and a write
+// reboots the cage so the new hooks take effect.
+func (a *Aviary) projectHooksDir(id string) string {
+	return filepath.Join(a.projectsDir, id, "pb_hooks")
+}
+
 // resolvePublicPath joins a caller-supplied relative path onto a project's
 // pb_public directory, rejecting anything that would escape it (via "..",
 // absolute paths, etc.). The returned path is guaranteed to live inside root.
@@ -118,13 +126,17 @@ func (a *Aviary) apiListFiles(w http.ResponseWriter, r *http.Request) {
 	if !a.projectExists(w, r, id) {
 		return
 	}
+	a.listFilesInRoot(w, a.projectPublicDir(id))
+}
 
-	root := a.projectPublicDir(id)
+// listFilesInRoot returns a flat, sorted listing of every regular file under
+// root. A missing root yields an empty listing. Callers must authorize first.
+func (a *Aviary) listFilesInRoot(w http.ResponseWriter, root string) {
 	entries := make([]fileEntry, 0)
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) && path == root {
-				return nil // pb_public not created yet -> empty listing
+				return nil // directory not created yet -> empty listing
 			}
 			return err
 		}
@@ -168,8 +180,13 @@ func (a *Aviary) apiReadFile(w http.ResponseWriter, r *http.Request) {
 	if !a.projectExists(w, r, id) {
 		return
 	}
+	a.readFileFromRoot(w, a.projectPublicDir(id), r.URL.Query().Get("path"))
+}
 
-	full, err := resolvePublicPath(a.projectPublicDir(id), r.URL.Query().Get("path"))
+// readFileFromRoot returns the text content of the file at rel under root.
+// Callers must authorize first.
+func (a *Aviary) readFileFromRoot(w http.ResponseWriter, root, rel string) {
+	full, err := resolvePublicPath(root, rel)
 	if err != nil {
 		a.apiError(w, http.StatusBadRequest, err.Error())
 		return
@@ -194,7 +211,7 @@ func (a *Aviary) apiReadFile(w http.ResponseWriter, r *http.Request) {
 		a.apiError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	rel, _ := filepath.Rel(a.projectPublicDir(id), full)
+	rel, _ = filepath.Rel(root, full)
 	writeJSON(w, http.StatusOK, fileContent{Path: filepath.ToSlash(rel), Content: string(data)})
 }
 
@@ -208,38 +225,48 @@ func (a *Aviary) apiWriteFile(w http.ResponseWriter, r *http.Request) {
 	if !a.projectExists(w, r, id) {
 		return
 	}
+	a.writeFileToRoot(w, r, id, a.projectPublicDir(id), true)
+}
 
+// writeFileToRoot creates or overwrites a file under root with the supplied
+// text. When applyQuota is true the write is checked against the project's
+// pb_public storage quota. It returns ok=true on a successful write (after
+// writing the success response). Callers must authorize first.
+func (a *Aviary) writeFileToRoot(w http.ResponseWriter, r *http.Request, id, root string, applyQuota bool) (ok bool) {
 	var req fileContent
 	if !decodeJSON(w, r, &req, a) {
-		return
+		return false
 	}
 	if len(req.Content) > maxEditableFileSize {
 		a.apiError(w, http.StatusRequestEntityTooLarge, "content is too large")
-		return
+		return false
 	}
 
-	full, err := resolvePublicPath(a.projectPublicDir(id), req.Path)
+	full, err := resolvePublicPath(root, req.Path)
 	if err != nil {
 		a.apiError(w, http.StatusBadRequest, err.Error())
-		return
+		return false
 	}
-	if msg, ok := a.checkWriteQuota(r, id, full, int64(len(req.Content))); !ok {
-		a.apiError(w, http.StatusInsufficientStorage, msg)
-		return
+	if applyQuota {
+		if msg, ok := a.checkWriteQuota(r, id, full, int64(len(req.Content))); !ok {
+			a.apiError(w, http.StatusInsufficientStorage, msg)
+			return false
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		a.apiError(w, http.StatusBadRequest, "cannot create parent directory: "+err.Error())
-		return
+		return false
 	}
 	if err := os.WriteFile(full, []byte(req.Content), 0o644); err != nil {
 		a.apiError(w, http.StatusInternalServerError, err.Error())
-		return
+		return false
 	}
-	rel, _ := filepath.Rel(a.projectPublicDir(id), full)
+	rel, _ := filepath.Rel(root, full)
 	writeJSON(w, http.StatusOK, fileEntry{
 		Path: filepath.ToSlash(rel),
 		Size: int64(len(req.Content)),
 	})
+	return true
 }
 
 // apiDeleteFile removes a single pb_public file.
@@ -251,29 +278,36 @@ func (a *Aviary) apiDeleteFile(w http.ResponseWriter, r *http.Request) {
 	if !a.projectExists(w, r, id) {
 		return
 	}
+	a.deleteFileFromRoot(w, a.projectPublicDir(id), r.URL.Query().Get("path"))
+}
 
-	full, err := resolvePublicPath(a.projectPublicDir(id), r.URL.Query().Get("path"))
+// deleteFileFromRoot removes the file at rel under root. It returns ok=true on a
+// successful delete (after writing the 204 response). Callers must authorize
+// first.
+func (a *Aviary) deleteFileFromRoot(w http.ResponseWriter, root, rel string) (ok bool) {
+	full, err := resolvePublicPath(root, rel)
 	if err != nil {
 		a.apiError(w, http.StatusBadRequest, err.Error())
-		return
+		return false
 	}
 	info, err := os.Stat(full)
 	switch {
 	case os.IsNotExist(err):
 		a.apiError(w, http.StatusNotFound, "file not found")
-		return
+		return false
 	case err != nil:
 		a.apiError(w, http.StatusInternalServerError, err.Error())
-		return
+		return false
 	case info.IsDir():
 		a.apiError(w, http.StatusBadRequest, "refusing to delete a directory")
-		return
+		return false
 	}
 	if err := os.Remove(full); err != nil {
 		a.apiError(w, http.StatusInternalServerError, err.Error())
-		return
+		return false
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return true
 }
 
 // projectExists writes a 404 and returns false when project id is not
