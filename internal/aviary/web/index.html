@@ -145,12 +145,33 @@
   .files-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .files-main-head { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
   .files-main-head input { flex: 1; font-family: "IBM Plex Mono", ui-monospace, monospace; }
-  .files-main textarea { width: 100%; min-height: 440px; resize: vertical; padding: 12px 14px;
-    border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel);
-    color: var(--fg); font: 13px/1.6 "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-    tab-size: 2; overflow: hidden; }
-  .files-main textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(51, 118, 229, .14); }
-  .files-main textarea:disabled { background: var(--panel2); color: var(--muted); }
+  /* Code editor: a transparent textarea (the real input) sits exactly over a
+     <pre> highlight layer that renders the same text with syntax coloring. */
+  .code-editor { position: relative; width: 100%; }
+  .code-editor pre, .code-editor textarea {
+    margin: 0; width: 100%; box-sizing: border-box; padding: 12px 14px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    font: 13px/1.6 "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    tab-size: 2; white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word; }
+  .code-editor pre { min-height: 440px; background: var(--panel); color: var(--fg);
+    overflow: hidden; pointer-events: none; }
+  .code-editor pre code { font: inherit; background: none; border: 0; padding: 0; border-radius: 0; }
+  .code-editor textarea { position: absolute; inset: 0; height: 100%; resize: none;
+    background: transparent; color: transparent; caret-color: var(--fg); overflow: hidden; }
+  .code-editor textarea:focus { outline: none; }
+  .code-editor textarea::placeholder { color: var(--muted); }
+  .code-editor.focused pre { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(51, 118, 229, .14); }
+  .code-editor.disabled pre { background: var(--panel2); }
+  /* Token colors (GitHub-light inspired). */
+  .tok-comment { color: #6a737d; font-style: italic; }
+  .tok-keyword { color: #d73a49; }
+  .tok-string { color: #032f62; }
+  .tok-number { color: #005cc5; }
+  .tok-function { color: #6f42c1; }
+  .tok-property { color: #005cc5; }
+  .tok-tag { color: #22863a; }
+  .tok-attr { color: #6f42c1; }
+  .tok-meta { color: #6a737d; }
   .toggle { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 14px; line-height: 1.5; }
   .toggle input { width: auto; margin: 3px 0 0; flex: 0 0 auto; }
   .toggle span { color: var(--fg); }
@@ -1290,6 +1311,76 @@ for (const t of document.querySelectorAll("#projectNav .nav-item[data-subview]")
 }
 $("pnBack").addEventListener("click", () => navigate("#/projects"));
 
+// --- Lightweight, dependency-free syntax highlighter --------------------------
+// Each grammar is an ordered list of [stickyRegex, tokenClass]. The scanner tries
+// the rules in order at each position; the first match wins. A null class means
+// "consume but don't color" (e.g. identifiers) so we don't fall back to slow
+// char-by-char scanning over words.
+function hlEscape(s) {
+  return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+}
+const HL_GRAMMARS = {
+  js: [
+    [/\/\/[^\n]*/y, "comment"],
+    [/\/\*[\s\S]*?\*\//y, "comment"],
+    [/`(?:\\.|[^`\\])*`/y, "string"],
+    [/"(?:\\.|[^"\\])*"/y, "string"],
+    [/'(?:\\.|[^'\\])*'/y, "string"],
+    [/\b\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?\b/y, "number"],
+    [/\b(?:const|let|var|function|return|if|else|for|while|do|switch|case|default|break|continue|new|delete|typeof|instanceof|void|in|of|class|extends|super|this|async|await|yield|try|catch|finally|throw|import|export|from|as|null|undefined|true|false|NaN|Infinity)\b/y, "keyword"],
+    [/[A-Za-z_$][\w$]*(?=\s*\()/y, "function"],
+    [/[A-Za-z_$][\w$]*/y, null],
+  ],
+  css: [
+    [/\/\*[\s\S]*?\*\//y, "comment"],
+    [/"(?:\\.|[^"\\])*"/y, "string"],
+    [/'(?:\\.|[^'\\])*'/y, "string"],
+    [/@[\w-]+/y, "keyword"],
+    [/#[0-9a-fA-F]{3,8}\b/y, "number"],
+    [/\b\d+(?:\.\d+)?(?:px|em|rem|ex|ch|vw|vh|vmin|vmax|%|s|ms|fr|deg|rad|turn|pt|pc|cm|mm|in)?\b/y, "number"],
+    [/[-A-Za-z]+(?=\s*:)/y, "property"],
+    [/[A-Za-z_][\w-]*/y, null],
+  ],
+  html: [
+    [/<!--[\s\S]*?-->/y, "comment"],
+    [/<!\s*[^>]*>/y, "meta"],
+    [/<\/?[A-Za-z][\w:-]*/y, "tag"],
+    [/\/?>/y, "tag"],
+    [/"(?:\\.|[^"\\])*"/y, "string"],
+    [/'(?:\\.|[^'\\])*'/y, "string"],
+    [/[A-Za-z_:][\w:.-]*(?=\s*=)/y, "attr"],
+    [/[A-Za-z_][\w-]*/y, null],
+  ],
+};
+function hlLangForPath(p) {
+  p = (p || "").toLowerCase();
+  if (/\.(?:c|m)?jsx?$/.test(p) || p.endsWith(".json")) return "js";
+  if (p.endsWith(".css")) return "css";
+  if (p.endsWith(".html") || p.endsWith(".htm")) return "html";
+  return null;
+}
+function highlightCode(code, lang) {
+  const rules = HL_GRAMMARS[lang];
+  if (!rules) return hlEscape(code);
+  let out = "", i = 0;
+  const n = code.length;
+  outer: while (i < n) {
+    for (const [re, cls] of rules) {
+      re.lastIndex = i;
+      const m = re.exec(code);
+      if (m && m.index === i && m[0].length > 0) {
+        const esc = hlEscape(m[0]);
+        out += cls ? `<span class="tok-${cls}">${esc}</span>` : esc;
+        i += m[0].length;
+        continue outer;
+      }
+    }
+    out += hlEscape(code[i]);
+    i++;
+  }
+  return out;
+}
+
 // makeFileEditor builds a self-contained file editor (list + textarea) bound to
 // a project sub-resource root ("files" -> pb_public, "hooks" -> pb_hooks). Both
 // editors share the per-project endpoint shape, so the only differences are the
@@ -1298,24 +1389,42 @@ $("pnBack").addEventListener("click", () => navigate("#/projects"));
 function makeFileEditor(opts) {
   const ids = opts.ids;
   let current = null;
+  let lang = null;
   const el = (k) => $(ids[k]);
+  const ta = el("content");
+
+  // Wrap the real textarea in a highlight overlay: a <pre><code> layer renders
+  // the same text with syntax coloring while the transparent textarea (kept as
+  // the source of truth) captures input on top of it.
+  const wrap = document.createElement("div");
+  wrap.className = "code-editor disabled";
+  const pre = document.createElement("pre");
+  pre.setAttribute("aria-hidden", "true");
+  const codeEl = document.createElement("code");
+  pre.append(codeEl);
+  ta.parentNode.insertBefore(wrap, ta);
+  wrap.append(pre, ta);
+  ta.addEventListener("focus", () => wrap.classList.add("focused"));
+  ta.addEventListener("blur", () => wrap.classList.remove("focused"));
 
   function setError(msg) { el("err").textContent = msg || ""; }
 
-  // Grow the editor to fit its content (so long hook files don't sit in a tiny
-  // scrolling box), never shrinking below the CSS min-height.
-  function autoGrow() {
-    const ta = el("content");
-    ta.style.height = "auto";
-    ta.style.height = ta.scrollHeight + "px";
+  // Repaint the highlight layer to match the textarea. The trailing newline keeps
+  // the <pre> tall enough when the content ends in a blank line.
+  function paint() {
+    let html = highlightCode(ta.value, lang);
+    if (ta.value.endsWith("\n")) html += "\n";
+    codeEl.innerHTML = html;
   }
 
   function clear() {
     current = null;
+    lang = null;
     el("path").value = "";
-    el("content").value = "";
-    el("content").style.height = "";
-    el("content").disabled = true;
+    ta.value = "";
+    paint();
+    wrap.classList.add("disabled");
+    ta.disabled = true;
     el("save").disabled = true;
     el("del").disabled = true;
   }
@@ -1342,12 +1451,14 @@ function makeFileEditor(opts) {
     const res = await api("GET", `/api/projects/${fvState.id}/${opts.root}/content?path=${encodeURIComponent(path)}`);
     if (!res.ok) { setError((res.data && res.data.error) || "Failed to open file."); return; }
     current = res.data.path;
+    lang = hlLangForPath(res.data.path);
     el("path").value = res.data.path;
-    el("content").value = res.data.content;
-    el("content").disabled = false;
+    ta.value = res.data.content;
+    wrap.classList.remove("disabled");
+    ta.disabled = false;
     el("save").disabled = false;
     el("del").disabled = false;
-    autoGrow();
+    paint();
     for (const li of el("list").children) li.classList.toggle("current", li.textContent === current);
   }
 
@@ -1387,7 +1498,7 @@ function makeFileEditor(opts) {
   el("del").addEventListener("click", del);
   el("new").addEventListener("click", create);
   el("newPath").addEventListener("keydown", (e) => { if (e.key === "Enter") create(); });
-  el("content").addEventListener("input", autoGrow);
+  el("content").addEventListener("input", paint);
 
   return { load, clear };
 }
