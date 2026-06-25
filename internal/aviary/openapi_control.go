@@ -47,6 +47,11 @@ func controlOpenAPI(serverURL string) oa {
 		"description": "File path relative to pb_hooks, forward-slash separated. PocketBase loads files matching *.pb.js as hook entrypoints (e.g. main.pb.js).",
 		"schema":      oa{"type": "string"},
 	}
+	cronIDParam := oa{
+		"name": "cronId", "in": "path", "required": true,
+		"description": "Cron job id.",
+		"schema":      oa{"type": "string"},
+	}
 
 	paths := oa{
 		"/api/openapi.json": oa{
@@ -246,6 +251,43 @@ func controlOpenAPI(serverURL string) oa {
 				"responses":   oa{"204": oa{"description": "Deleted"}, "400": errResp("Invalid path"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("File not found")},
 			},
 		},
+		"/api/projects/{id}/crons": oa{
+			"get": oa{
+				"tags": []any{"crons"}, "summary": "List a project's scheduled jobs (cron)",
+				"description": "Returns the project's cron jobs and their last-run status. Owner-only (superuser or granted collaborator); project-scoped API keys are rejected because a job runs server-side project code.",
+				"parameters":  []any{idParam},
+				"responses":   oa{"200": oa{"description": "Cron jobs", "content": jsonBody(oa{"type": "array", "items": ref("CronJob")})["content"]}, "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found")},
+			},
+			"post": oa{
+				"tags": []any{"crons"}, "summary": "Create a scheduled job",
+				"description": "Registers a cron job. The control plane owns the schedule and wakes the project's cage on demand to invoke the target POST route, so scheduled work survives idle eviction. The target path must be under /cron/ (by convention served by a routerAdd(\"POST\", \"/cron/...\") JS hook).",
+				"parameters":  []any{idParam},
+				"requestBody": jsonBody(ref("CreateCronJob")),
+				"responses":   oa{"201": oa{"description": "Job created", "content": jsonBody(ref("CronJob"))["content"]}, "400": errResp("Invalid schedule or path"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found")},
+			},
+		},
+		"/api/projects/{id}/crons/{cronId}": oa{
+			"patch": oa{
+				"tags": []any{"crons"}, "summary": "Update a scheduled job",
+				"description": "Edits the schedule, target path and/or enabled flag. Omitted or blank fields are left unchanged. The scheduler is re-synced immediately.",
+				"parameters":  []any{idParam, cronIDParam},
+				"requestBody": jsonBody(ref("UpdateCronJob")),
+				"responses":   oa{"200": oa{"description": "Job updated", "content": jsonBody(ref("CronJob"))["content"]}, "400": errResp("Invalid schedule or path"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Cron job not found")},
+			},
+			"delete": oa{
+				"tags": []any{"crons"}, "summary": "Delete a scheduled job",
+				"parameters": []any{idParam, cronIDParam},
+				"responses":  oa{"204": oa{"description": "Deleted"}, "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Cron job not found")},
+			},
+		},
+		"/api/projects/{id}/crons/{cronId}/run": oa{
+			"post": oa{
+				"tags": []any{"crons"}, "summary": "Run a scheduled job now",
+				"description": "Triggers the job immediately (regardless of its enabled flag) and returns it with the refreshed last-run outcome. Useful for testing a job's target route.",
+				"parameters":  []any{idParam, cronIDParam},
+				"responses":   oa{"200": oa{"description": "Job ran (see lastStatus/lastError)", "content": jsonBody(ref("CronJob"))["content"]}, "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Cron job not found")},
+			},
+		},
 		"/api/projects/{id}/deploy": oa{
 			"post": oa{
 				"tags": []any{"files"}, "summary": "Deploy a built site archive into pb_public",
@@ -355,6 +397,7 @@ func controlOpenAPI(serverURL string) oa {
 			oa{"name": "files", "description": "Per-project static files (pb_public)"},
 			oa{"name": "hooks", "description": "Per-project JS hooks (pb_hooks); owner-only, reboots the project on change"},
 			oa{"name": "keys", "description": "Per-project API keys for agents/CI"},
+			oa{"name": "crons", "description": "Per-project scheduled jobs (cron); owner-only, run by the control plane"},
 			oa{"name": "superuser", "description": "Platform superuser"},
 			oa{"name": "collaborators", "description": "Per-project collaborators"},
 			oa{"name": "invitations", "description": "Collaborator invitations"},
@@ -505,6 +548,38 @@ func controlOpenAPI(serverURL string) oa {
 					"allOf": []any{
 						ref("APIKey"),
 						oa{"type": "object", "required": []any{"token"}, "properties": oa{"token": oa{"type": "string", "description": "The secret token, shown exactly once. Send it as 'Authorization: Bearer <token>'."}}},
+					},
+				},
+				"CronJob": oa{
+					"type": "object",
+					"properties": oa{
+						"id":         oa{"type": "string"},
+						"projectId":  oa{"type": "string"},
+						"schedule":   oa{"type": "string", "description": "A 5-field cron expression or a macro such as @daily, @hourly."},
+						"path":       oa{"type": "string", "description": "Target route invoked on each tick; always under /cron/ (POST)."},
+						"enabled":    oa{"type": "boolean"},
+						"created":    oa{"type": "string", "format": "date-time"},
+						"updated":    oa{"type": "string", "format": "date-time"},
+						"lastRun":    oa{"type": "string", "format": "date-time", "description": "When the job last ran, if ever."},
+						"lastStatus": oa{"type": "integer", "description": "HTTP status of the last invocation; 0 = never run."},
+						"lastError":  oa{"type": "string", "description": "Error from the last invocation, if any."},
+					},
+				},
+				"CreateCronJob": oa{
+					"type":     "object",
+					"required": []any{"schedule", "path"},
+					"properties": oa{
+						"schedule": oa{"type": "string", "description": "A 5-field cron expression or a macro such as @daily, @hourly."},
+						"path":     oa{"type": "string", "description": "Target route under /cron/ (a bare name is treated as relative to /cron/). Invoked with POST and a minted superuser token."},
+						"enabled":  oa{"type": "boolean", "description": "Defaults to true when omitted."},
+					},
+				},
+				"UpdateCronJob": oa{
+					"type": "object",
+					"properties": oa{
+						"schedule": oa{"type": "string", "description": "New cron expression; omit or leave blank to keep the current value."},
+						"path":     oa{"type": "string", "description": "New target path under /cron/; omit or leave blank to keep the current value."},
+						"enabled":  oa{"type": "boolean", "description": "Enable or disable the job; omit to keep the current value."},
 					},
 				},
 				"DeployResult": oa{

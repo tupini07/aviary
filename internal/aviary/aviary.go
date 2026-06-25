@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/tupini07/aviary/internal/controlplane"
+
+	"github.com/pocketbase/pocketbase/tools/cron"
 )
 
 // Config controls how the Aviary hosts projects.
@@ -63,6 +65,10 @@ type Aviary struct {
 
 	suPasskeySessions *suSessionStore
 	ssoTickets        *ticketStore
+
+	cron        *cron.Cron
+	cronMu      sync.Mutex
+	cronRunning map[string]struct{} // job ids currently executing (single-flight)
 
 	quit chan struct{}
 	wg   sync.WaitGroup
@@ -125,10 +131,17 @@ func New(cfg Config) (*Aviary, error) {
 	}
 	a.suPasskeySessions = newSUSessionStore()
 	a.ssoTickets = newTicketStore()
+	a.cronRunning = make(map[string]struct{})
 	a.control = a.controlHandler()
 
 	a.wg.Add(1)
 	go a.reaper()
+
+	// Load and start the control-plane cron scheduler. Failure to load jobs is
+	// logged but non-fatal: the rest of the control plane still works.
+	if err := a.startCron(); err != nil {
+		a.log.Warn("failed to start cron scheduler", "error", err)
+	}
 
 	return a, nil
 }
@@ -309,6 +322,9 @@ func (a *Aviary) Shutdown() {
 		// already shut down
 	default:
 		close(a.quit)
+	}
+	if a.cron != nil {
+		a.cron.Stop()
 	}
 	a.wg.Wait()
 

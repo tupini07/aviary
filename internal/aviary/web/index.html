@@ -294,6 +294,7 @@
       <button type="button" class="nav-item current" data-subview="fvFiles"><span class="ico">▤</span> Files</button>
       <button type="button" class="nav-item" data-subview="fvHooks"><span class="ico">⚡</span> Hooks</button>
       <button type="button" class="nav-item" data-subview="fvKeys"><span class="ico">⚿</span> API keys</button>
+      <button type="button" class="nav-item" data-subview="fvCron"><span class="ico">⏱</span> Cron</button>
       <button type="button" class="nav-item su-only" data-subview="fvSettings"><span class="ico">⚙</span> Settings</button>
       <div class="nav-sep"></div>
       <a class="nav-item" id="pnDashboard" target="_blank" rel="noopener"><span class="ico">▥</span> Dashboard ↗</a>
@@ -428,6 +429,28 @@
             <div style="flex:0 0 auto"><button id="fvKeyCreate" class="secondary" type="button">Create key</button></div>
           </div>
           <div class="err" id="fvKeysErr"></div>
+        </div>
+      </div>
+
+      <!-- Cron sub-view -->
+      <div class="subview" data-subview="fvCron">
+        <div class="card" id="fvCronCard">
+          <h2 style="margin-top:0">Scheduled jobs (cron)</h2>
+          <p class="muted" style="font-size:13px; margin-top:0">
+            The control plane owns these schedules and wakes the project on demand to run them, so
+            scheduled work keeps firing even while the project is idle and evicted. Each job sends an
+            authenticated <code>POST</code> to a route under <code>/cron/</code> — register it with a
+            JS hook, e.g. <code>routerAdd("POST", "/cron/cleanup", (e) =&gt; { /* … */ return e.json(200, {}) })</code>.
+            Use a 5-field cron expression or a macro like <code>@daily</code>, <code>@hourly</code>.
+          </p>
+          <ul id="fvCronList" class="keys-list"></ul>
+          <div class="empty hidden" id="fvCronEmpty">No scheduled jobs yet.</div>
+          <div class="row" style="margin-top:14px; align-items:flex-end">
+            <div><label for="fvCronSchedule">Schedule</label><input id="fvCronSchedule" placeholder="@daily or 0 3 * * *" /></div>
+            <div><label for="fvCronPath">Target path</label><input id="fvCronPath" placeholder="/cron/cleanup" /></div>
+            <div style="flex:0 0 auto"><button id="fvCronCreate" class="secondary" type="button">Add job</button></div>
+          </div>
+          <div class="err" id="fvCronErr"></div>
         </div>
       </div>
 
@@ -1353,12 +1376,14 @@ function openFiles(p) {
   hooksEditor.clear();
   $("fvKeyReveal").classList.add("hidden");
   $("fvKeysErr").textContent = "";
+  $("fvCronErr").textContent = "";
   $("fvDelProjectErr").textContent = "";
   showFilesTab("fvFiles");
   showView("files");
   filesEditor.load();
   hooksEditor.load();
   loadKeys();
+  loadCrons();
   loadMetrics();
 }
 
@@ -1421,6 +1446,102 @@ async function revokeKey(id, label) {
   if (!res.ok) { $("fvKeysErr").textContent = (res.data && res.data.error) || "Failed to revoke API key."; return; }
   await loadKeys();
 }
+
+async function loadCrons() {
+  const res = await api("GET", `/api/projects/${fvState.id}/crons`);
+  const list = $("fvCronList");
+  list.innerHTML = "";
+  if (!res.ok) { $("fvCronErr").textContent = (res.data && res.data.error) || "Failed to load scheduled jobs."; return; }
+  const jobs = Array.isArray(res.data) ? res.data : [];
+  $("fvCronEmpty").classList.toggle("hidden", jobs.length !== 0);
+  for (const j of jobs) {
+    const li = document.createElement("li");
+    const main = document.createElement("div");
+    const label = document.createElement("div");
+    label.className = "k-label";
+    label.textContent = `${j.schedule}  →  ${j.path}`;
+    if (!j.enabled) {
+      const tag = document.createElement("span");
+      tag.className = "muted";
+      tag.style.fontWeight = "400";
+      tag.textContent = "  (disabled)";
+      label.append(tag);
+    }
+    const meta = document.createElement("div");
+    meta.className = "k-meta";
+    meta.textContent = cronStatusText(j);
+    main.append(label, meta);
+    const spacer = document.createElement("div");
+    spacer.className = "k-spacer";
+
+    const run = document.createElement("button");
+    run.className = "ghost";
+    run.textContent = "Run now";
+    run.onclick = () => runCron(j.id);
+
+    const toggle = document.createElement("button");
+    toggle.className = "ghost";
+    toggle.textContent = j.enabled ? "Disable" : "Enable";
+    toggle.onclick = () => toggleCron(j.id, !j.enabled);
+
+    const del = document.createElement("button");
+    del.className = "danger";
+    del.textContent = "Delete";
+    del.onclick = () => deleteCron(j.id, j.path);
+
+    li.append(main, spacer, run, toggle, del);
+    list.append(li);
+  }
+}
+
+function cronStatusText(j) {
+  if (!j.lastRun) return "never run";
+  const ok = j.lastStatus >= 200 && j.lastStatus < 400;
+  const bits = [`last run ${fmtDate(j.lastRun)}`, `status ${j.lastStatus || "?"}`];
+  if (!ok && j.lastError) bits.push(j.lastError);
+  return bits.join(" · ");
+}
+
+async function createCronJob() {
+  $("fvCronErr").textContent = "";
+  const schedule = $("fvCronSchedule").value.trim();
+  const path = $("fvCronPath").value.trim();
+  if (!schedule) { $("fvCronErr").textContent = "Enter a schedule, e.g. @daily or 0 3 * * *."; return; }
+  if (!path) { $("fvCronErr").textContent = "Enter a target path under /cron/."; return; }
+  const res = await api("POST", `/api/projects/${fvState.id}/crons`, { schedule, path });
+  if (!res.ok) { $("fvCronErr").textContent = (res.data && res.data.error) || "Failed to create job."; return; }
+  $("fvCronSchedule").value = "";
+  $("fvCronPath").value = "";
+  await loadCrons();
+}
+
+async function runCron(id) {
+  $("fvCronErr").textContent = "";
+  const res = await api("POST", `/api/projects/${fvState.id}/crons/${encodeURIComponent(id)}/run`, {});
+  if (!res.ok) { $("fvCronErr").textContent = (res.data && res.data.error) || "Failed to run job."; return; }
+  const j = res.data || {};
+  if (j.lastStatus && (j.lastStatus < 200 || j.lastStatus >= 400)) {
+    $("fvCronErr").textContent = `Job ran but the target returned ${j.lastStatus}${j.lastError ? " — " + j.lastError : ""}.`;
+  }
+  await loadCrons();
+}
+
+async function toggleCron(id, enabled) {
+  $("fvCronErr").textContent = "";
+  const res = await api("PATCH", `/api/projects/${fvState.id}/crons/${encodeURIComponent(id)}`, { enabled });
+  if (!res.ok) { $("fvCronErr").textContent = (res.data && res.data.error) || "Failed to update job."; return; }
+  await loadCrons();
+}
+
+async function deleteCron(id, path) {
+  if (!confirm(`Delete the scheduled job for "${path}"?`)) return;
+  $("fvCronErr").textContent = "";
+  const res = await api("DELETE", `/api/projects/${fvState.id}/crons/${encodeURIComponent(id)}`);
+  if (!res.ok) { $("fvCronErr").textContent = (res.data && res.data.error) || "Failed to delete job."; return; }
+  await loadCrons();
+}
+
+$("fvCronCreate").addEventListener("click", createCronJob);
 
 $("fvKeyCreate").addEventListener("click", createKey);
 $("fvKeyCopy").addEventListener("click", async () => {

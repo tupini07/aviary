@@ -66,6 +66,17 @@ func (a *Aviary) controlHandler() http.Handler {
 	mux.HandleFunc("PUT /api/projects/{id}/hooks/content", a.requireAuth(a.apiWriteHook))
 	mux.HandleFunc("DELETE /api/projects/{id}/hooks/content", a.requireAuth(a.apiDeleteHook))
 
+	// Scheduled jobs (cron). The control plane owns the schedule and wakes the
+	// project's cage on demand to invoke a POST /cron/... route, so scheduled
+	// work survives idle eviction. Management is owner-only (superuser or
+	// granted collaborator); project-scoped API keys are rejected because a job
+	// runs server-side project code.
+	mux.HandleFunc("GET /api/projects/{id}/crons", a.requireAuth(a.apiListCrons))
+	mux.HandleFunc("POST /api/projects/{id}/crons", a.requireAuth(a.apiCreateCron))
+	mux.HandleFunc("PATCH /api/projects/{id}/crons/{cronId}", a.requireAuth(a.apiUpdateCron))
+	mux.HandleFunc("DELETE /api/projects/{id}/crons/{cronId}", a.requireAuth(a.apiDeleteCron))
+	mux.HandleFunc("POST /api/projects/{id}/crons/{cronId}/run", a.requireAuth(a.apiRunCron))
+
 	// Bulk atomic deploy: publish a built site (tar.gz/zip) into pb_public in a
 	// single swap. Same auth as the file endpoints (cookie or API key).
 	mux.HandleFunc("POST /api/projects/{id}/deploy", a.requireAuth(a.apiDeployProject))

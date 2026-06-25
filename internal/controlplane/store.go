@@ -157,7 +157,22 @@ CREATE TABLE IF NOT EXISTS api_keys (
 	expires_at   TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_api_keys_project ON api_keys (project_id);`
+CREATE INDEX IF NOT EXISTS idx_api_keys_project ON api_keys (project_id);
+
+CREATE TABLE IF NOT EXISTS cron_jobs (
+	id          TEXT PRIMARY KEY,
+	project_id  TEXT NOT NULL,
+	schedule    TEXT NOT NULL,
+	path        TEXT NOT NULL,
+	enabled     INTEGER NOT NULL DEFAULT 1,
+	created_at  TEXT NOT NULL,
+	updated_at  TEXT NOT NULL,
+	last_run_at TEXT,
+	last_status INTEGER NOT NULL DEFAULT 0,
+	last_error  TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_cron_jobs_project ON cron_jobs (project_id);`
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("controlplane: migrate: %w", err)
 	}
@@ -318,6 +333,9 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM api_keys WHERE project_id = ?`, id); err != nil {
 		return fmt.Errorf("controlplane: delete project api keys %q: %w", id, err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM cron_jobs WHERE project_id = ?`, id); err != nil {
+		return fmt.Errorf("controlplane: delete project cron jobs %q: %w", id, err)
 	}
 	return nil
 }

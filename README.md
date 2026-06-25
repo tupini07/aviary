@@ -251,6 +251,11 @@ curl -s -b cj -i http://127.0.0.1:8090/api/projects/alpha/dashboard
 | `GET /api/projects/{id}/keys`     | owner³          | List a project's API keys        |
 | `POST /api/projects/{id}/keys`    | owner³          | Mint a project-scoped API key (token shown once) |
 | `DELETE /api/projects/{id}/keys/{keyId}` | owner³   | Revoke an API key                |
+| `GET /api/projects/{id}/crons`    | owner³          | List a project's scheduled (cron) jobs |
+| `POST /api/projects/{id}/crons`   | owner³          | Create a scheduled job           |
+| `PATCH /api/projects/{id}/crons/{cronId}` | owner³  | Update a scheduled job (schedule/path/enabled) |
+| `DELETE /api/projects/{id}/crons/{cronId}` | owner³ | Delete a scheduled job           |
+| `POST /api/projects/{id}/crons/{cronId}/run` | owner³ | Run a scheduled job now (for testing) |
 | `GET /api/projects`               | any¹            | List projects (scoped by access) |
 | `POST /api/invitations`           | superuser       | Invite a collaborator to a project |
 | `GET /api/invitations`            | superuser       | List pending invitations         |
@@ -271,9 +276,10 @@ The `files` endpoints additionally accept a **project-scoped API key** (see
 ² `PUT /api/superuser` is allowed unauthenticated **only** for first-run setup
 (while no superuser exists); afterwards it requires a session.
 
-³ *owner* = a superuser or a collaborator granted that project. Key management
-and the `hooks` editor are deliberately **not** reachable with an API key — a
-leaked deploy key cannot mint further keys or write server-side code.
+³ *owner* = a superuser or a collaborator granted that project. Key management,
+the `hooks` editor and `crons` management are deliberately **not** reachable with
+an API key — a leaked deploy key cannot mint further keys, write server-side code
+or schedule server-side jobs.
 
 ### API documentation (OpenAPI 3.1)
 
@@ -444,9 +450,62 @@ Notes:
   (`$os.cmd`, filesystem, …) and run in the Aviary process. This is fine for the
   single-operator model Aviary targets (you manage all your own projects); it is
   **not** a sandbox for untrusted third-party code.
-- **For scheduled work, prefer control-plane cron** (planned, see the roadmap)
-  over in-hook `cronAdd()`: a project's own cron stops when its idle cage is
-  evicted, whereas control-plane cron jobs wake the project on demand.
+- **For scheduled work, prefer control-plane cron** (see [Scheduled jobs
+  (cron)](#scheduled-jobs-cron)) over in-hook `cronAdd()`: a project's own cron
+  stops when its idle cage is evicted, whereas control-plane cron jobs wake the
+  project on demand.
+
+### Scheduled jobs (cron)
+
+Aviary runs scheduled work for a project from the **control plane**, not from
+inside the project. This matters because cages are idle-evicted: a project's own
+`cronAdd()` stops firing as soon as its cage is reaped, exactly the
+no-HTTP-traffic case background jobs need. Instead, the always-on control plane
+owns each schedule and **wakes the project on demand** to run it (in-process —
+no public exposure), then lets the reaper evict it again. This mirrors the
+Cloudflare Cron Triggers model.
+
+A job is just a schedule pointing at a `POST` route under `/cron/`, which you
+implement as a JS hook. Define the handler once in `pb_hooks`:
+
+```js
+// pb_hooks/main.pb.js
+routerAdd("POST", "/cron/cleanup", (e) => {
+  // e.auth is the minted superuser; do scheduled work here…
+  return e.json(200, { ok: true })
+})
+```
+
+then register the schedule from the **Cron** tab in the project workspace, or via
+the API (owner session — superuser or granted collaborator):
+
+```bash
+# run /cron/cleanup every day at 03:00
+curl -sb cookies.txt -X POST \
+  -H 'content-type: application/json' \
+  --data '{"schedule":"0 3 * * *","path":"/cron/cleanup"}' \
+  http://127.0.0.1:8090/api/projects/alpha/crons
+
+# trigger a job immediately to test it
+curl -sb cookies.txt -X POST \
+  http://127.0.0.1:8090/api/projects/alpha/crons/<cronId>/run
+```
+
+Notes:
+
+- **Schedules** are 5-field cron expressions or macros (`@daily`, `@hourly`,
+  `@weekly`, `@monthly`, `@yearly`).
+- **Targets are constrained to `POST /cron/…`.** A bare name (`cleanup`) is
+  treated as relative to `/cron/`. Jobs cannot hit arbitrary public routes.
+- **Authenticated.** Each invocation carries a freshly minted superuser token, so
+  the target route runs with full backend access. The route is a normal project
+  route, so guard it (`if (!e.auth) return e.json(401, {})`) — only the scheduler
+  has the token.
+- **Owner-only.** Like the hooks editor, cron management rejects project-scoped
+  API keys (a job runs server-side code).
+- **Single-flight + timeout.** A tick is skipped if the previous run of the same
+  job is still in flight, and each run is bounded by a timeout. Missed ticks while
+  Aviary is down are not replayed (same as PocketBase and Cloudflare cron).
 
 ### Storage quotas & metrics
 
@@ -549,6 +608,7 @@ control-plane login page first if you have no session).
 | `internal/aviary/deploy.go`         | Atomic archive deploy (.tar.gz/.zip → pb_public swap) |
 | `internal/aviary/metrics.go`        | Per-project storage metrics + pb_public quota enforcement |
 | `internal/aviary/apikeys.go`        | Project-scoped API keys (mint/list/revoke) + bearer auth |
+| `internal/aviary/cron.go`           | Control-plane cron scheduler + invoker + management API (owner-only) |
 | `internal/aviary/openapi.go` + `openapi_control.go` + `openapi_project.go` | OpenAPI 3.1 specs (control plane + on-the-fly per project) |
 | `internal/aviary/collaborators.go` + `collaborator_api.go` | Invitations + project-scoped collaborators |
 | `internal/aviary/ui.go` + `web/`    | Embedded control-plane web UI                   |
@@ -558,6 +618,7 @@ control-plane login page first if you have no session).
 | `internal/controlplane/store.go`    | Persistent project registry (SQLite)            |
 | `internal/controlplane/collaborators.go` | Collaborator + invitation persistence      |
 | `internal/controlplane/apikeys.go`  | API-key persistence (hashed tokens)             |
+| `internal/controlplane/cron.go`     | Cron-job persistence (schedule/target/last-run) |
 
 ## Roadmap
 
@@ -578,4 +639,4 @@ control-plane login page first if you have no session).
 - [x] Self-update command (`aviary update` — download + verify the matching GitHub release, atomic binary swap)
 - [x] Per-project storage quotas and metrics (pb_public usage + quota enforcement on write/deploy)
 - [x] Per-project JS hooks (`pb_hooks`) editor — owner-only, reboots the project on change
-- [ ] Control-plane cron scheduler (wakes idle projects on demand to run scheduled jobs)
+- [x] Control-plane cron scheduler (wakes idle projects on demand to run scheduled jobs)
