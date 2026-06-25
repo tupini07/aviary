@@ -439,8 +439,10 @@
           <p class="muted" style="font-size:13px; margin-top:0">
             The control plane owns these schedules and wakes the project on demand to run them, so
             scheduled work keeps firing even while the project is idle and evicted. Each job sends an
-            authenticated <code>POST</code> to a route under <code>/cron/</code> — register it with a
-            JS hook, e.g. <code>routerAdd("POST", "/cron/cleanup", (e) =&gt; { /* … */ return e.json(200, {}) })</code>.
+            authenticated <code>POST</code> to a route in your project — by convention one under
+            <code>/cron/</code> registered with a JS hook, e.g.
+            <code>routerAdd("POST", "/cron/cleanup", (e) =&gt; { /* … */ return e.json(200, {}) })</code>,
+            but any absolute path works.
             Use a 5-field cron expression or a macro like <code>@daily</code>, <code>@hourly</code>.
           </p>
           <ul id="fvCronList" class="keys-list"></ul>
@@ -1570,7 +1572,7 @@ async function createCronJob() {
   const schedule = $("fvCronSchedule").value.trim();
   const path = $("fvCronPath").value.trim();
   if (!schedule) { $("fvCronErr").textContent = "Enter a schedule, e.g. @daily or 0 3 * * *."; return; }
-  if (!path) { $("fvCronErr").textContent = "Enter a target path under /cron/."; return; }
+  if (!path) { $("fvCronErr").textContent = "Enter a target path, e.g. /cron/cleanup."; return; }
   const res = await api("POST", `/api/projects/${fvState.id}/crons`, { schedule, path });
   if (!res.ok) { $("fvCronErr").textContent = (res.data && res.data.error) || "Failed to create job."; return; }
   $("fvCronSchedule").value = "";

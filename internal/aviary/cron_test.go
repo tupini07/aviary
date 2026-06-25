@@ -98,7 +98,6 @@ func TestCronValidation(t *testing.T) {
 	}{
 		{"bad schedule", cronJobRequest{Schedule: "not a cron", Path: "/cron/x"}},
 		{"empty schedule", cronJobRequest{Schedule: "", Path: "/cron/x"}},
-		{"path outside /cron/", cronJobRequest{Schedule: "@daily", Path: "/other"}},
 		{"empty path", cronJobRequest{Schedule: "@daily", Path: ""}},
 		{"traversal path", cronJobRequest{Schedule: "@daily", Path: "/cron/../etc"}},
 	}

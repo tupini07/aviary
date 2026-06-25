@@ -154,8 +154,8 @@ func (a *Aviary) executeCronJob(ctx context.Context, projectID, id string) (int,
 
 // --- validation helpers ---
 
-// normalizeCronPath enforces the convention that cron targets are POST routes
-// under /cron/. A bare name (no leading slash) is treated as relative to /cron/.
+// normalizeCronPath validates a cron target path. Any absolute path is allowed;
+// a bare name (no leading slash) is treated as relative to /cron/ for convenience.
 func normalizeCronPath(p string) (string, error) {
 	p = strings.TrimSpace(p)
 	if p == "" {
@@ -166,9 +166,6 @@ func normalizeCronPath(p string) (string, error) {
 	}
 	if strings.Contains(p, "..") {
 		return "", errors.New("path must not contain '..'")
-	}
-	if !strings.HasPrefix(p, "/cron/") || strings.TrimPrefix(p, "/cron/") == "" {
-		return "", errors.New("cron target path must be under /cron/ (e.g. /cron/cleanup)")
 	}
 	return p, nil
 }

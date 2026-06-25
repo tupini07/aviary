@@ -260,7 +260,7 @@ func controlOpenAPI(serverURL string) oa {
 			},
 			"post": oa{
 				"tags": []any{"crons"}, "summary": "Create a scheduled job",
-				"description": "Registers a cron job. The control plane owns the schedule and wakes the project's cage on demand to invoke the target POST route, so scheduled work survives idle eviction. The target path must be under /cron/ (by convention served by a routerAdd(\"POST\", \"/cron/...\") JS hook).",
+				"description": "Registers a cron job. The control plane owns the schedule and wakes the project's cage on demand to invoke the target POST route, so scheduled work survives idle eviction. The target is any absolute path (by convention served by a routerAdd(\"POST\", \"/cron/...\") JS hook).",
 				"parameters":  []any{idParam},
 				"requestBody": jsonBody(ref("CreateCronJob")),
 				"responses":   oa{"201": oa{"description": "Job created", "content": jsonBody(ref("CronJob"))["content"]}, "400": errResp("Invalid schedule or path"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found")},
@@ -556,7 +556,7 @@ func controlOpenAPI(serverURL string) oa {
 						"id":         oa{"type": "string"},
 						"projectId":  oa{"type": "string"},
 						"schedule":   oa{"type": "string", "description": "A 5-field cron expression or a macro such as @daily, @hourly."},
-						"path":       oa{"type": "string", "description": "Target route invoked on each tick; always under /cron/ (POST)."},
+						"path":       oa{"type": "string", "description": "Target route invoked on each tick (POST)."},
 						"enabled":    oa{"type": "boolean"},
 						"created":    oa{"type": "string", "format": "date-time"},
 						"updated":    oa{"type": "string", "format": "date-time"},
@@ -570,7 +570,7 @@ func controlOpenAPI(serverURL string) oa {
 					"required": []any{"schedule", "path"},
 					"properties": oa{
 						"schedule": oa{"type": "string", "description": "A 5-field cron expression or a macro such as @daily, @hourly."},
-						"path":     oa{"type": "string", "description": "Target route under /cron/ (a bare name is treated as relative to /cron/). Invoked with POST and a minted superuser token."},
+						"path":     oa{"type": "string", "description": "Target route (any absolute path; a bare name is treated as relative to /cron/). Invoked with POST and a minted superuser token."},
 						"enabled":  oa{"type": "boolean", "description": "Defaults to true when omitted."},
 					},
 				},
@@ -578,7 +578,7 @@ func controlOpenAPI(serverURL string) oa {
 					"type": "object",
 					"properties": oa{
 						"schedule": oa{"type": "string", "description": "New cron expression; omit or leave blank to keep the current value."},
-						"path":     oa{"type": "string", "description": "New target path under /cron/; omit or leave blank to keep the current value."},
+						"path":     oa{"type": "string", "description": "New target path; omit or leave blank to keep the current value."},
 						"enabled":  oa{"type": "boolean", "description": "Enable or disable the job; omit to keep the current value."},
 					},
 				},

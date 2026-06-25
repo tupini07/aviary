@@ -465,8 +465,9 @@ owns each schedule and **wakes the project on demand** to run it (in-process —
 no public exposure), then lets the reaper evict it again. This mirrors the
 Cloudflare Cron Triggers model.
 
-A job is just a schedule pointing at a `POST` route under `/cron/`, which you
-implement as a JS hook. Define the handler once in `pb_hooks`:
+A job is just a schedule pointing at a `POST` route in your project — by
+convention one under `/cron/` that you implement as a JS hook. Define the
+handler once in `pb_hooks`:
 
 ```js
 // pb_hooks/main.pb.js
@@ -495,8 +496,8 @@ Notes:
 
 - **Schedules** are 5-field cron expressions or macros (`@daily`, `@hourly`,
   `@weekly`, `@monthly`, `@yearly`).
-- **Targets are constrained to `POST /cron/…`.** A bare name (`cleanup`) is
-  treated as relative to `/cron/`. Jobs cannot hit arbitrary public routes.
+- **Targets** are any absolute `POST` path; by convention `/cron/…`. A bare name
+  (`cleanup`) is treated as relative to `/cron/`.
 - **Authenticated.** Each invocation carries a freshly minted superuser token, so
   the target route runs with full backend access. The route is a normal project
   route, so guard it (`if (!e.auth) return e.json(401, {})`) — only the scheduler
