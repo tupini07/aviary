@@ -145,12 +145,12 @@
   .files-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .files-main-head { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
   .files-main-head input { flex: 1; font-family: "IBM Plex Mono", ui-monospace, monospace; }
-  #fvContent { width: 100%; min-height: 440px; resize: vertical; padding: 12px 14px;
+  .files-main textarea { width: 100%; min-height: 440px; resize: vertical; padding: 12px 14px;
     border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel);
     color: var(--fg); font: 13px/1.6 "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-    tab-size: 2; }
-  #fvContent:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(51, 118, 229, .14); }
-  #fvContent:disabled { background: var(--panel2); color: var(--muted); }
+    tab-size: 2; overflow: hidden; }
+  .files-main textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(51, 118, 229, .14); }
+  .files-main textarea:disabled { background: var(--panel2); color: var(--muted); }
   .toggle { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 14px; line-height: 1.5; }
   .toggle input { width: auto; margin: 3px 0 0; flex: 0 0 auto; }
   .toggle span { color: var(--fg); }
@@ -786,7 +786,9 @@ async function showApp() {
   for (const el of document.querySelectorAll(".su-only")) {
     el.classList.toggle("hidden", !isSuper);
   }
-  showView("projects");
+  // Render whatever the current URL hash points at (defaults to the projects
+  // list), so a reload or a shared link restores the right location.
+  handleRoute();
 
   if (isSuper) {
     $("suEmail").value = state.email;
@@ -963,7 +965,7 @@ async function loadProjects() {
     const manage = document.createElement("button");
     manage.className = "secondary"; manage.textContent = "Manage";
     manage.title = "Open this project's workspace (files, API keys, settings)";
-    manage.onclick = () => openFiles(p);
+    manage.onclick = () => navigate(`#/projects/${encodeURIComponent(p.id)}`);
     acts.append(manage);
 
     if (isSuper) {
@@ -1088,8 +1090,58 @@ function showView(name) {
   if (name === "docs") loadDocs();
 }
 for (const b of document.querySelectorAll("#mainNav .nav-item")) {
-  b.addEventListener("click", () => showView(b.dataset.view));
+  b.addEventListener("click", () => navigate("#/" + b.dataset.view));
 }
+
+// --- hash routing -----------------------------------------------------------
+// The whole UI is a single page; without this a reload or the browser's
+// back/forward buttons would always dump you on the projects list. Every
+// navigation writes a URL hash, and one hashchange handler renders whatever the
+// hash describes, so the current location is bookmarkable and survives reloads.
+const SUBVIEW_BY_SLUG = { files: "fvFiles", hooks: "fvHooks", keys: "fvKeys", cron: "fvCron", settings: "fvSettings" };
+const SLUG_BY_SUBVIEW = { fvFiles: "files", fvHooks: "hooks", fvKeys: "keys", fvCron: "cron", fvSettings: "settings" };
+
+function navigate(hash) {
+  if (location.hash === hash) { handleRoute(); }
+  else { location.hash = hash; } // triggers hashchange -> handleRoute
+}
+
+function routeParts() {
+  return location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+}
+
+async function handleRoute() {
+  if (!state.authenticated) return; // routing only applies inside the app
+  const parts = routeParts();
+  const top = parts[0] || "projects";
+  if (top === "projects" && parts[1]) {
+    await openProjectById(parts[1], parts[2] || "files");
+    return;
+  }
+  if (["projects", "docs", "team", "settings"].includes(top)) {
+    showView(top);
+    return;
+  }
+  showView("projects");
+}
+
+// openProjectById renders a project workspace (optionally a specific sub-tab),
+// fetching the project when it isn't already open (e.g. on a fresh reload).
+async function openProjectById(id, slug) {
+  let sub = SUBVIEW_BY_SLUG[slug] || "fvFiles";
+  if (sub === "fvSettings" && state.role === "collaborator") sub = "fvFiles";
+  if (fvState.id === id && fvState.project) {
+    showView("files");
+    showFilesTab(sub);
+    return;
+  }
+  const res = await api("GET", `/api/projects/${encodeURIComponent(id)}`);
+  if (!res.ok) { navigate("#/projects"); return; }
+  openFiles(res.data, sub);
+}
+
+window.addEventListener("hashchange", handleRoute);
+
 
 // --- API docs (rendered from the control-plane OpenAPI spec) ---
 const PROJECT_OPENAPI_PATH = "/__aviary/openapi.json";
@@ -1232,9 +1284,9 @@ function showFilesTab(name) {
   }
 }
 for (const t of document.querySelectorAll("#projectNav .nav-item[data-subview]")) {
-  t.addEventListener("click", () => showFilesTab(t.dataset.subview));
+  t.addEventListener("click", () => navigate(`#/projects/${encodeURIComponent(fvState.id)}/${SLUG_BY_SUBVIEW[t.dataset.subview]}`));
 }
-$("pnBack").addEventListener("click", () => showView("projects"));
+$("pnBack").addEventListener("click", () => navigate("#/projects"));
 
 // makeFileEditor builds a self-contained file editor (list + textarea) bound to
 // a project sub-resource root ("files" -> pb_public, "hooks" -> pb_hooks). Both
@@ -1248,10 +1300,19 @@ function makeFileEditor(opts) {
 
   function setError(msg) { el("err").textContent = msg || ""; }
 
+  // Grow the editor to fit its content (so long hook files don't sit in a tiny
+  // scrolling box), never shrinking below the CSS min-height.
+  function autoGrow() {
+    const ta = el("content");
+    ta.style.height = "auto";
+    ta.style.height = ta.scrollHeight + "px";
+  }
+
   function clear() {
     current = null;
     el("path").value = "";
     el("content").value = "";
+    el("content").style.height = "";
     el("content").disabled = true;
     el("save").disabled = true;
     el("del").disabled = true;
@@ -1284,6 +1345,7 @@ function makeFileEditor(opts) {
     el("content").disabled = false;
     el("save").disabled = false;
     el("del").disabled = false;
+    autoGrow();
     for (const li of el("list").children) li.classList.toggle("current", li.textContent === current);
   }
 
@@ -1323,6 +1385,7 @@ function makeFileEditor(opts) {
   el("del").addEventListener("click", del);
   el("new").addEventListener("click", create);
   el("newPath").addEventListener("keydown", (e) => { if (e.key === "Enter") create(); });
+  el("content").addEventListener("input", autoGrow);
 
   return { load, clear };
 }
@@ -1359,8 +1422,8 @@ function projectOrigin(id) {
   return `${proto}//${base}${port}`;
 }
 
-function openFiles(p) {
-  fvState = { id: p.id, name: p.name || "", current: null };
+function openFiles(p, sub = "fvFiles") {
+  fvState = { id: p.id, name: p.name || "", current: null, project: p };
   $("fvProject").textContent = `· ${p.id}`;
   $("fvSpa").checked = !!p.spa;
 
@@ -1378,7 +1441,7 @@ function openFiles(p) {
   $("fvKeysErr").textContent = "";
   $("fvCronErr").textContent = "";
   $("fvDelProjectErr").textContent = "";
-  showFilesTab("fvFiles");
+  showFilesTab(sub);
   showView("files");
   filesEditor.load();
   hooksEditor.load();
@@ -1570,8 +1633,9 @@ $("fvDelProject").addEventListener("click", async () => {
   if (!confirm(`Delete project "${fvState.id}"? This permanently removes its data.`)) return;
   const res = await api("DELETE", `/api/projects/${fvState.id}`);
   if (!res.ok) { $("fvDelProjectErr").textContent = (res.data && res.data.error) || "Failed to delete project."; return; }
-  showView("projects");
+  fvState = { id: null, name: "", current: null };
   loadProjects();
+  navigate("#/projects");
 });
 
 const MiB = 1024 * 1024;
