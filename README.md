@@ -508,6 +508,30 @@ Notes:
   job is still in flight, and each run is bounded by a timeout. Missed ticks while
   Aviary is down are not replayed (same as PocketBase and Cloudflare cron).
 
+#### PocketBase's built-in maintenance crons
+
+Every PocketBase instance registers its own housekeeping crons — visible under
+**Settings → Crons** in a project's dashboard: `__pbMFACleanup__` and
+`__pbOTPCleanup__` (hourly), `__pbDBOptimize__` (daily WAL checkpoint +
+`PRAGMA optimize`), and `__pbLogsCleanup__` (every 6h). Aviary *does* start
+PocketBase's scheduler while a cage is booted, but these jobs **only fire if the
+cage happens to be running at the scheduled minute**, and there is no catch-up —
+so for idle, rarely-booted projects they are usually skipped.
+
+This is an accepted trade-off, not a bug: expiry is enforced at read time (stale
+OTP/MFA rows are harmless), records and logs only accrue while a cage is up (the
+backlog is self-bounded), and the WAL is checkpointed when the cage's DB closes
+on eviction. There is deliberately **no** control-plane re-implementation of
+these, because the only faithful way to run them is inside each project's own DB
+context — doing so on a timer would have to wake every project on every tick,
+defeating idle eviction.
+
+The one gap to be aware of: PocketBase's **auto-backup** schedule
+(`__pbAutoBackup__`, configured under Settings → Backups) is also a cage-local
+cron, so it will **not** run reliably under idle eviction. If you need scheduled
+backups, register a control-plane cron job (above) that hits a `POST /cron/…`
+route which triggers a backup (`$app.createBackup(...)`) instead.
+
 ### Storage quotas & metrics
 
 Each project exposes a usage snapshot at `GET /api/projects/{id}/metrics`

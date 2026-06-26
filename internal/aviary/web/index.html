@@ -474,9 +474,16 @@
             <div style="flex:0 0 auto"><button id="fvCronCreate" class="secondary" type="button">Add job</button></div>
           </div>
           <div class="err" id="fvCronErr"></div>
+          <p class="muted" style="font-size:12px; margin:14px 0 0; border-top:1px solid var(--border); padding-top:12px">
+            <strong>Note:</strong> PocketBase's own maintenance crons (under
+            <em>Settings → Crons</em> in the dashboard — OTP/MFA/log cleanup, DB optimize) run only
+            while the project is booted, so idle projects may skip them. That's harmless (expiry is
+            checked at read time and the WAL is checkpointed on eviction). The exception is scheduled
+            <em>backups</em>: register a control-plane job here that hits a <code>/cron/…</code> route
+            calling <code>$app.createBackup()</code> rather than relying on PocketBase's auto-backup.
+          </p>
         </div>
       </div>
-
       <!-- Settings sub-view (superuser only) -->
       <div class="subview su-only" data-subview="fvSettings">
         <div class="card" id="fvStorageCard">
