@@ -324,7 +324,7 @@
       <button type="button" class="nav-item" data-subview="fvKeys"><span class="ico">⚿</span> API keys</button>
       <button type="button" class="nav-item su-only" data-subview="fvSettings"><span class="ico">⚙</span> Settings</button>
       <div class="nav-sep"></div>
-      <a class="nav-item" id="pnDashboard" target="_blank" rel="noopener"><span class="ico">▥</span> Dashboard ↗</a>
+      <a class="nav-item" id="pnDashboard" target="_blank" rel="noopener"><span class="ico">▥</span> PocketBase dashboard ↗</a>
       <a class="nav-item" id="pnVisit" target="_blank" rel="noopener"><span class="ico">⦿</span> Visit site ↗</a>
     </nav>
     <div class="sidebar-foot">
@@ -1000,7 +1000,7 @@ async function loadProjects() {
     const acts = document.createElement("div"); acts.className = "actions";
 
     const open = document.createElement("a");
-    open.className = "btnlink"; open.textContent = "Dashboard";
+    open.className = "btnlink"; open.textContent = "PocketBase dashboard";
     open.href = `/api/projects/${p.id}/dashboard`; open.target = "_blank"; open.rel = "noopener";
     if (p.status !== "active") { open.style.pointerEvents = "none"; open.style.opacity = ".5"; }
     acts.append(open);
