@@ -228,6 +228,7 @@ curl -s -b cj -i http://127.0.0.1:8090/api/projects/alpha/dashboard
 | --------------------------------- | --------------- | -------------------------------- |
 | `GET /`                           | public          | Control-plane web UI             |
 | `GET /api/openapi.json`           | public          | OpenAPI 3.1 spec of this API     |
+| `GET /llms.txt`                   | public          | LLM/agent orientation index      |
 | `GET /api/auth/session`           | public          | Current auth + setup state       |
 | `POST /api/auth/login`            | public          | Log in, set session cookie       |
 | `POST /api/auth/logout`           | public          | Clear session cookie             |
@@ -314,6 +315,12 @@ The control plane also renders this spec in-app: the **Docs** section reads
 `/api/openapi.json` and lists every control-plane endpoint (grouped by tag, with
 parameters, responses and auth requirements), alongside links to the raw JSON
 and to each project's live `/__aviary/openapi.json`.
+
+For LLMs and agents, the control host also serves a thin
+[`/llms.txt`](https://llmstxt.org) orientation index — a short block of stable
+operating-model invariants plus links to the canonical sources (this OpenAPI
+spec, the README, the PocketBase JS docs). It deliberately links rather than
+restates, so it can't drift out of sync with the API or these docs.
 
 ### Static file hosting & editor (pb_public)
 

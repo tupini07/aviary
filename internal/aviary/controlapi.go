@@ -111,6 +111,9 @@ func (a *Aviary) controlHandler() http.Handler {
 	// Machine-readable OpenAPI description of this control-plane API.
 	mux.HandleFunc("GET /api/openapi.json", a.apiControlOpenAPI)
 
+	// LLM/agent orientation index (https://llmstxt.org).
+	mux.HandleFunc("GET /llms.txt", a.apiLlmsTxt)
+
 	return mux
 }
 
