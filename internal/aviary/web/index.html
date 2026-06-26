@@ -143,7 +143,8 @@
   .files-list li:hover { background: var(--panel2); }
   .files-list li.current { background: var(--accent); color: #fff; }
   .files-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .files-main-head { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+  .files-main-head { position: sticky; top: 0; z-index: 5; background: var(--panel);
+    display: flex; gap: 10px; align-items: center; padding-bottom: 10px; }
   .files-main-head input { flex: 1; font-family: "IBM Plex Mono", ui-monospace, monospace; }
   /* Code editor: a transparent textarea (the real input) sits exactly over a
      <pre> highlight layer that renders the same text with syntax coloring. */
