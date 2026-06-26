@@ -501,8 +501,9 @@ curl -sb cookies.txt -X POST \
 
 Notes:
 
-- **Schedules** are 5-field cron expressions or macros (`@daily`, `@hourly`,
-  `@weekly`, `@monthly`, `@yearly`).
+- **Schedules** are 5-field cron expressions (e.g. `*/15 * * * *`) or one of the
+  macros `@yearly` (alias `@annually`), `@monthly`, `@weekly`, `@daily` (alias
+  `@midnight`), `@hourly`.
 - **Targets** are any absolute `POST` path; by convention `/cron/…`. A bare name
   (`cleanup`) is treated as relative to `/cron/`.
 - **Authenticated.** Each invocation carries a freshly minted superuser token, so

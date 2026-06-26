@@ -193,6 +193,11 @@
   .storagebar { margin-top: 12px; height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; }
   .storagebar-fill { height: 100%; background: var(--accent); transition: width .2s; }
   .storagebar-fill.over { background: var(--danger); }
+  /* ---------- Cron macros ---------- */
+  .cron-macros { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px;
+    margin: 0 0 4px; font-size: 13px; align-items: baseline; }
+  .cron-macros dt { white-space: nowrap; }
+  .cron-macros dd { margin: 0; color: var(--muted); }
   /* ---------- API docs ---------- */
   .docs-tag { margin-top: 22px; }
   .docs-tag:first-child { margin-top: 6px; }
@@ -464,8 +469,15 @@
             <code>/cron/</code> registered with a JS hook, e.g.
             <code>routerAdd("POST", "/cron/cleanup", (e) =&gt; { /* … */ return e.json(200, {}) })</code>,
             but any absolute path works.
-            Use a 5-field cron expression or a macro like <code>@daily</code>, <code>@hourly</code>.
+            Use a 5-field cron expression (e.g. <code>*/15 * * * *</code>) or one of these macros:
           </p>
+          <dl class="cron-macros">
+            <dt><code>@yearly</code> <span class="muted">(or <code>@annually</code>)</span></dt><dd><code>0 0 1 1 *</code> — midnight on Jan 1</dd>
+            <dt><code>@monthly</code></dt><dd><code>0 0 1 * *</code> — midnight on the 1st</dd>
+            <dt><code>@weekly</code></dt><dd><code>0 0 * * 0</code> — Sunday at midnight</dd>
+            <dt><code>@daily</code> <span class="muted">(or <code>@midnight</code>)</span></dt><dd><code>0 0 * * *</code> — every day at midnight</dd>
+            <dt><code>@hourly</code></dt><dd><code>0 * * * *</code> — every hour, on the hour</dd>
+          </dl>
           <ul id="fvCronList" class="keys-list"></ul>
           <div class="empty hidden" id="fvCronEmpty">No scheduled jobs yet.</div>
           <div class="row" style="margin-top:14px; align-items:flex-end">
