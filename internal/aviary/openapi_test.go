@@ -76,6 +76,17 @@ func TestControlOpenAPI(t *testing.T) {
 	if _, ok := secSchemes["bearerAuth"]; !ok {
 		t.Errorf("control spec missing bearerAuth security scheme")
 	}
+
+	deploy := p["/api/projects/{id}/deploy"].(map[string]any)["post"].(map[string]any)
+	parameters := deploy["parameters"].([]any)
+	if len(parameters) != 1 || parameters[0].(map[string]any)["name"] != "id" {
+		t.Errorf("deploy parameters = %#v, want only project id", parameters)
+	}
+	deployResult := schemas["DeployResult"].(map[string]any)["properties"].(map[string]any)
+	mode := deployResult["mode"].(map[string]any)
+	if mode["const"] != "replace" {
+		t.Errorf("deploy mode schema = %#v, want const replace", mode)
+	}
 }
 
 func TestControlOpenAPIEndpoint(t *testing.T) {

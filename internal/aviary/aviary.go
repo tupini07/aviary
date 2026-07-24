@@ -70,6 +70,9 @@ type Aviary struct {
 	cronMu      sync.Mutex
 	cronRunning map[string]struct{} // job ids currently executing (single-flight)
 
+	deployMu    sync.Mutex
+	deployLocks map[string]chan struct{}
+
 	quit chan struct{}
 	wg   sync.WaitGroup
 }
@@ -127,6 +130,7 @@ func New(cfg Config) (*Aviary, error) {
 		cages:       make(map[string]*cage),
 		sessionKey:  sessionKey,
 		loginLimit:  newLoginRateLimiter(10, time.Minute),
+		deployLocks: make(map[string]chan struct{}),
 		quit:        make(chan struct{}),
 	}
 	a.suPasskeySessions = newSUSessionStore()

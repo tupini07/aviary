@@ -28,8 +28,8 @@ const (
 	roleSuperuser    = "superuser"
 	roleCollaborator = "collaborator"
 	// roleAPIKey is the role of a request authenticated by a project-scoped
-	// API key. It can act only on its bound project's files/deploys and can
-	// never perform superuser or owner-only operations.
+	// API key. It can act only on its bound project's automation endpoints and
+	// can never perform instance-wide or owner-only operations.
 	roleAPIKey = "apikey"
 )
 

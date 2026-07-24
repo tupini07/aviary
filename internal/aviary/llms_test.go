@@ -23,9 +23,14 @@ func TestLlmsTxtEndpoint(t *testing.T) {
 		"http://localhost/api/openapi.json",
 		"github.com/tupini07/aviary",
 		"pocketbase.io/docs/js-overview",
+		"aviary deploy",
+		"full replacements",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("/llms.txt missing %q\n---\n%s", want, body)
 		}
+	}
+	if strings.Contains(body, "manage that project's files, keys") {
+		t.Fatal("/llms.txt incorrectly says project API keys can manage keys")
 	}
 }

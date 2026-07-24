@@ -181,7 +181,8 @@ func controlOpenAPI(serverURL string) oa {
 		},
 		"/api/projects/{id}/admin-token": oa{
 			"post": oa{
-				"tags": []any{"projects"}, "summary": "Mint a PocketBase superuser token for the project",
+				"security": cookieOrKey,
+				"tags":     []any{"projects"}, "summary": "Mint a PocketBase superuser token for the project",
 				"description": "Returns a short-lived PocketBase superuser auth token for the project's PocketBase API, the programmatic equivalent of dashboard SSO. Lets migrations, seed scripts and CI drive the project as a superuser without enabling native password login. Accepts a session cookie or a project-scoped API key (key callers receive a token for the federated control-plane superuser). Use the returned `token` as a Bearer against `apiURL` (the project's PocketBase origin).",
 				"parameters":  []any{idParam},
 				"responses": oa{
@@ -291,11 +292,11 @@ func controlOpenAPI(serverURL string) oa {
 		"/api/projects/{id}/deploy": oa{
 			"post": oa{
 				"tags": []any{"files"}, "summary": "Deploy a built site archive into pb_public",
-				"description": "Upload a .tar.gz (gzip) or .zip of a built site; Aviary extracts it and publishes the result into the project's pb_public directory in a single atomic swap (never half-deployed). By default the archive is overlaid on existing files; pass ?clean=true to replace the directory wholesale. The body is the raw archive bytes. Accepts a session cookie or a project-scoped API key — the intended target for CI.",
+				"description": "Upload a non-empty .tar.gz (gzip) or .zip of a built site. Aviary extracts it and atomically replaces the project's entire pb_public directory, so stale files are removed and clients never see a half-deployed artifact set. A rejected upload leaves the live site untouched. The body is the raw archive bytes. Accepts a session cookie or a project-scoped API key; `aviary deploy` packages and sends a local build directory for developer and CI use.",
 				"security":    cookieOrKey,
-				"parameters":  []any{idParam, oa{"name": "clean", "in": "query", "required": false, "description": "Replace pb_public entirely instead of overlaying.", "schema": oa{"type": "boolean", "default": false}}},
+				"parameters":  []any{idParam},
 				"requestBody": oa{"required": true, "content": oa{"application/gzip": oa{"schema": oa{"type": "string", "format": "binary"}}, "application/zip": oa{"schema": oa{"type": "string", "format": "binary"}}, "application/octet-stream": oa{"schema": oa{"type": "string", "format": "binary"}}}},
-				"responses":   oa{"200": oa{"description": "Deploy published", "content": jsonBody(ref("DeployResult"))["content"]}, "400": errResp("Invalid or unsupported archive"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found"), "413": errResp("Archive exceeds the upload limit")},
+				"responses":   oa{"200": oa{"description": "Replacement deploy published", "content": jsonBody(ref("DeployResult"))["content"]}, "400": errResp("Empty, invalid or unsupported archive"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found"), "413": errResp("Archive exceeds the upload limit")},
 			},
 		},
 		"/api/projects/{id}/metrics": oa{
@@ -316,7 +317,7 @@ func controlOpenAPI(serverURL string) oa {
 			},
 			"post": oa{
 				"tags": []any{"keys"}, "summary": "Create a project-scoped API key",
-				"description": "Mints a non-interactive credential for agents/CI to drive this project's file (and future deploy) endpoints via Authorization: Bearer. The raw token is returned exactly once.",
+				"description": "Mints a non-interactive credential for agents/CI to drive this project's file, deployment, metrics and admin-token endpoints via Authorization: Bearer. The raw token is returned exactly once.",
 				"parameters":  []any{idParam},
 				"requestBody": jsonBody(ref("CreateAPIKey")),
 				"responses":   oa{"201": oa{"description": "Key created (token shown once)", "content": jsonBody(ref("CreatedAPIKey"))["content"]}, "400": errResp("Invalid request"), "401": errResp("Authentication required"), "403": errResp("No access to this project"), "404": errResp("Project not found")},
@@ -413,7 +414,7 @@ func controlOpenAPI(serverURL string) oa {
 				},
 				"bearerAuth": oa{
 					"type": "http", "scheme": "bearer",
-					"description": "A project-scoped API key (token of the form av_...) sent as 'Authorization: Bearer <token>'. Authorizes only that project's file and deploy endpoints.",
+					"description": "A project-scoped API key (token of the form av_...) sent as 'Authorization: Bearer <token>'. Authorizes only that project's automation endpoints, never instance-wide operations or API-key management.",
 				},
 			},
 			"schemas": oa{
@@ -585,7 +586,7 @@ func controlOpenAPI(serverURL string) oa {
 				"DeployResult": oa{
 					"type": "object",
 					"properties": oa{
-						"mode":  oa{"type": "string", "enum": []any{"overlay", "replace"}, "description": "Whether the archive was overlaid on existing files or replaced them."},
+						"mode":  oa{"type": "string", "const": "replace", "description": "Always replace; retained for response compatibility."},
 						"files": oa{"type": "integer", "description": "Number of files extracted and published."},
 						"bytes": oa{"type": "integer", "format": "int64", "description": "Total uncompressed bytes written."},
 					},

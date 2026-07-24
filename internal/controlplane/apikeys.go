@@ -10,8 +10,8 @@ import (
 
 // APIKey is a project-scoped, non-interactive credential. Only the SHA-256 hash
 // of the raw token is stored, so a leaked database cannot be used to reconstruct
-// usable keys. A key authorizes access to exactly one project — the file and
-// deploy endpoints of that project — never instance-wide operations.
+// usable keys. A key authorizes automation for exactly one project, never
+// instance-wide operations or API-key management.
 type APIKey struct {
 	ID         string     `json:"id"`
 	ProjectID  string     `json:"projectId"`

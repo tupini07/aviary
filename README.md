@@ -87,6 +87,10 @@ CGO_ENABLED=0 go build -o aviary .
 ./aviary -version
 ```
 
+The same release binary is both the server and the deployment client
+(`aviary project ...`, `aviary deploy`), so developers and CI do not need a
+separate `aviaryctl` download.
+
 Two GitHub workflows automate this:
 
 - **CI** (`.github/workflows/ci.yml`) runs `go vet`, `go build` and the test
@@ -248,7 +252,8 @@ curl -s -b cj -i http://127.0.0.1:8090/api/projects/alpha/dashboard
 | `GET /api/projects/{id}/hooks/content?path=…` | owner³ | Read a pb_hooks file            |
 | `PUT /api/projects/{id}/hooks/content` | owner³     | Create/overwrite a pb_hooks file (reboots the project) |
 | `DELETE /api/projects/{id}/hooks/content?path=…` | owner³ | Delete a pb_hooks file (reboots the project) |
-| `POST /api/projects/{id}/deploy`  | any¹            | Atomically deploy a `.tar.gz`/`.zip` into pb_public |
+| `POST /api/projects/{id}/deploy`  | any¹            | Atomically replace pb_public from a `.tar.gz`/`.zip` |
+| `GET /api/projects/{id}/metrics`  | any¹            | Read project storage usage and quota |
 | `GET /api/projects/{id}/keys`     | owner³          | List a project's API keys        |
 | `POST /api/projects/{id}/keys`    | owner³          | Mint a project-scoped API key (token shown once) |
 | `DELETE /api/projects/{id}/keys/{keyId}` | owner³   | Revoke an API key                |
@@ -270,9 +275,8 @@ curl -s -b cj -i http://127.0.0.1:8090/api/projects/alpha/dashboard
 ¹ `GET /api/projects`, `GET /api/projects/{id}`, the dashboard SSO and the
 per-project `files` endpoints are available to collaborators too, but only for
 the projects they have been granted; instance-wide mutations are superuser-only.
-The `files` endpoints additionally accept a **project-scoped API key** (see
-[API keys](#api-keys-for-agents--ci)). So does `POST /api/projects/{id}/deploy`
-(see [Deploying a built site](#deploying-a-built-site)).
+The `files`, `deploy`, `metrics` and `admin-token` endpoints additionally accept
+a **project-scoped API key** (see [API keys](#api-keys-for-agents--ci)).
 
 ² `PUT /api/superuser` is allowed unauthenticated **only** for first-run setup
 (while no superuser exists); afterwards it requires a session.
@@ -367,9 +371,10 @@ curl -s http://alpha.localhost:8090/
 
 Editing files through the UI is convenient for humans, but agents and CI want a
 non-interactive credential. Each project can mint **project-scoped API keys**: a
-key authorizes exactly one project's `files` and `deploy` endpoints and nothing
-else — never instance-wide operations, and never key management itself, so a
-leaked deploy key cannot escalate by minting more keys.
+key authorizes automation for exactly one project (`files`, replacement
+deployments, metrics and short-lived PocketBase admin tokens), never
+instance-wide operations or key management itself. A leaked key therefore
+cannot reach other projects or mint more keys.
 
 Create and revoke keys from the **Files** view (the *API keys* card), or via the
 API. The raw token is shown **once**, at creation; only its SHA-256 hash is
@@ -392,26 +397,72 @@ curl -s -X PUT http://127.0.0.1:8090/api/projects/alpha/files/content \
 Keys may carry an optional expiry (`expiresInDays`); omit it for a non-expiring
 key. Revoking a key (or deleting its project) invalidates it immediately.
 
+For local CLI use, save a key outside the repository with
+`aviary project credentials set` (it securely prompts when run in a terminal).
+Set `AVIARY_KEY` instead in CI. The optional saved credential is plain JSON
+restricted to the current OS user under the standard user config directory; use
+the environment-only workflow if local persistence is not appropriate.
+
 ### Deploying a built site
 
 Writing files one-by-one is fine for small edits, but a real web app is a whole
-build output (`dist/`). `POST /api/projects/{id}/deploy` takes an entire site as
-a single `.tar.gz` or `.zip` (format auto-detected) and swaps it into `pb_public`
-**atomically**: the archive is extracted into a staging directory alongside
-`pb_public`, then renamed into place, so a request never sees a half-written
-site, and a failed/corrupt upload leaves the live site untouched. The static
-route reads live from disk, so the new site is served immediately — no reboot.
-
-- **Overlay (default):** the archive is layered over the current `pb_public`,
-  so files you don't include are kept.
-- **Clean replace:** add `?clean=true` to replace `pb_public` wholesale.
-
-Authenticate with an owner session **or** a project API key. Safety caps apply:
-50 MiB compressed upload, 250 MiB uncompressed, 5000 files; path traversal
-(`../`, absolute paths) is rejected.
+build output (`dist/`). Initialize a repository once, optionally save its key,
+then deploy:
 
 ```bash
-# tar the *contents* of dist (-C dist .) so paths land at the pb_public root
+aviary project init \
+  --url https://aviary-console.example.com \
+  --project alpha \
+  --dir dist
+
+aviary project credentials set  # paste the av_... key; stored outside the repo
+aviary deploy                    # may be run from any subdirectory
+```
+
+`project init` writes a commit-safe `.aviary.json`:
+
+```json
+{
+  "url": "https://aviary-console.example.com",
+  "project": "alpha",
+  "directory": "dist"
+}
+```
+
+The CLI searches for this file from the current directory upward. Flags override
+environment variables, which override `.aviary.json`; API-key lookup is
+`--key`, then `AVIARY_KEY`, then the saved user credential. Relative configured
+build directories are resolved from the directory containing `.aviary.json`.
+One-shot use without a config file is also supported:
+
+```bash
+AVIARY_KEY=av_xxx aviary deploy \
+  --url https://aviary-console.example.com \
+  --project alpha \
+  ./dist
+```
+
+User credentials are stored at the `aviary/config.json` path below:
+
+| OS | Base user config directory |
+| --- | --- |
+| Linux/Unix | `$XDG_CONFIG_HOME`, or `~/.config` |
+| macOS | `~/Library/Application Support` |
+| Windows | `%AppData%` |
+
+Every deploy is a **full replacement**: files omitted from the new build are
+removed. The CLI rejects empty build directories, and the server independently
+rejects empty archives. `POST /api/projects/{id}/deploy` accepts the generated
+`.tar.gz` (or a caller-supplied `.zip`) and stages it beside `pb_public` before
+an atomic swap, so a failed upload leaves the live site untouched and no request
+sees a half-written artifact set. Files are served immediately without reboot.
+
+Authenticate with an owner session or project API key. Safety caps apply:
+50 MiB compressed upload, 250 MiB uncompressed, 5000 files; path traversal
+(`../`, absolute paths) and non-regular archive entries are rejected.
+
+```bash
+# Low-level equivalent: tar the contents of dist and call the raw API.
 tar -C dist -czf - . | curl -s -X POST \
   -H 'Authorization: Bearer av_…' \
   -H 'Content-Type: application/gzip' \
@@ -419,11 +470,10 @@ tar -C dist -czf - . | curl -s -X POST \
   http://127.0.0.1:8090/api/projects/alpha/deploy
 ```
 
-The [`examples/`](examples/) directory has a portable `deploy.sh` and a ready-to-copy
-[GitHub Actions workflow](examples/github-actions-deploy.yml) that builds a web app
-in CI and pushes the artifact to Aviary on every push to `main` — the typical
-pattern: build in CI, deploy the static output, with the project's own cage as
-the PocketBase backend.
+The [`examples/`](examples/) directory has a portable raw-HTTP `deploy.sh` and a
+ready-to-copy [GitHub Actions workflow](examples/github-actions-deploy.yml).
+The workflow installs the released Aviary binary, reads the committed
+`.aviary.json`, and supplies only `AVIARY_KEY` as a repository secret.
 
 ### JS hooks (pb_hooks)
 
@@ -626,7 +676,9 @@ control-plane login page first if you have no session).
 
 | Path                                | Responsibility                                  |
 | ----------------------------------- | ----------------------------------------------- |
-| `main.go`                           | Flags + front HTTP server + `--seed`            |
+| `main.go`                           | Subcommand dispatch + front HTTP server flags   |
+| `projectconfig.go`                  | `.aviary.json` + per-user CLI credential storage |
+| `deploycli.go`                      | `aviary deploy` build packaging + upload client |
 | `selfupdate.go`                     | `aviary update` (download + checksum + atomic binary swap) |
 | `internal/aviary/aviary.go`         | Registry, subdomain routing, idle eviction      |
 | `internal/aviary/provisioning.go`   | Create/list/delete/disable projects             |
@@ -669,6 +721,7 @@ control-plane login page first if you have no session).
 - [x] Static file hosting per project (`pb_public`) + in-browser file editor + SPA fallback toggle
 - [x] Project-scoped API keys for agents/CI (bearer auth on the file/deploy endpoints)
 - [x] Atomic archive deploy endpoint + GitHub Action (build in CI, push artifact)
+- [x] First-class `aviary deploy` CLI + project/user configuration
 - [x] Self-update command (`aviary update` — download + verify the matching GitHub release, atomic binary swap)
 - [x] Per-project storage quotas and metrics (pb_public usage + quota enforcement on write/deploy)
 - [x] Per-project JS hooks (`pb_hooks`) editor — owner-only, reboots the project on change

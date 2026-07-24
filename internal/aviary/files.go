@@ -248,6 +248,12 @@ func (a *Aviary) writeFileToRoot(w http.ResponseWriter, r *http.Request, id, roo
 		return false
 	}
 	if applyQuota {
+		unlock, err := a.lockProjectFiles(r.Context(), id)
+		if err != nil {
+			a.apiError(w, http.StatusRequestTimeout, "file write canceled while waiting to publish")
+			return false
+		}
+		defer unlock()
 		if msg, ok := a.checkWriteQuota(r, id, full, int64(len(req.Content))); !ok {
 			a.apiError(w, http.StatusInsufficientStorage, msg)
 			return false
@@ -278,6 +284,12 @@ func (a *Aviary) apiDeleteFile(w http.ResponseWriter, r *http.Request) {
 	if !a.projectExists(w, r, id) {
 		return
 	}
+	unlock, err := a.lockProjectFiles(r.Context(), id)
+	if err != nil {
+		a.apiError(w, http.StatusRequestTimeout, "file delete canceled while waiting to publish")
+		return
+	}
+	defer unlock()
 	a.deleteFileFromRoot(w, a.projectPublicDir(id), r.URL.Query().Get("path"))
 }
 

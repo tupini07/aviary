@@ -147,7 +147,11 @@ func TestReplaceExecutable(t *testing.T) {
 
 func TestRunUpdateFullFlow(t *testing.T) {
 	bin := []byte("brand new aviary binary")
-	archive := buildZip(t, map[string][]byte{"aviary": bin})
+	binaryName := "aviary"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	archive := buildZip(t, map[string][]byte{binaryName: bin})
 	srv := releaseServer(t, "v1.5.0", archive, map[string]string{
 		"aviary_1.5.0_" + runtime.GOOS + "_" + archKey() + ".zip": sha256hex(archive),
 	})

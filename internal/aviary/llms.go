@@ -44,8 +44,12 @@ any cached summary.
   (by convention ` + "`/cron/…`" + `) that the control plane invokes with a freshly
   minted superuser token, waking the project on demand.
 - Auth: an operator session (superuser or granted collaborator) can do
-  everything; a project-scoped API key can manage that project's files, keys and
-  metrics but NOT server-side code (hooks and crons are owner-only).
+  everything; a project-scoped API key can access that project's files,
+  replacement deployments, metrics and admin-token automation, but cannot
+  manage keys or server-side code (hooks and crons are owner-only).
+- Static-site deployments are full replacements: ` + "`aviary deploy`" + ` packages the
+  configured build directory and atomically replaces ` + "`pb_public`" + `. It rejects an
+  empty build, and rejected uploads leave the current site untouched.
 
 ## API
 
@@ -58,7 +62,8 @@ any cached summary.
 ## Docs
 
 - [README](https://github.com/tupini07/aviary#readme): concepts and operations —
-  cages, idle eviction, JS hooks, scheduled jobs, storage quotas, deployment.
+  cages, idle eviction, JS hooks, scheduled jobs, storage quotas, project config
+  and ` + "`aviary deploy`" + `.
 - [PocketBase JS hooks](https://pocketbase.io/docs/js-overview/): the API
   available inside ` + "`pb_hooks`" + ` (globals like ` + "`$app`" + `, ` + "`routerAdd`" + `, ` + "`cronAdd`" + `,
   event hooks). Aviary registers the stock jsvm plugin unmodified, so all

@@ -1,16 +1,15 @@
 # Example GitHub Actions workflow: build a static web app and deploy it to an
 # Aviary project on every push to main.
 #
-# Concretely models the typical flow: build the UI in CI, then
-# push the artifact to Aviary (whose cage is the project's own PocketBase
-# backend — one instance, one config, no in-process building on the host).
-#
 # Setup:
-#   1. In the Aviary control plane, open the project's Files view and create an
-#      API key (or POST /api/projects/{id}/keys). Copy the av_... token once.
-#   2. In the GitHub repo: Settings → Secrets and variables → Actions, add a
+#   1. In the Aviary control plane, open the project's API keys view and create
+#      a key. Copy the av_... token once.
+#   2. Run and commit:
+#        aviary project init --url https://console.example.com \
+#          --project my-web-app --dir dist
+#   3. In the GitHub repo: Settings -> Secrets and variables -> Actions, add a
 #      secret named AVIARY_KEY with that token.
-#   3. Adjust AVIARY_URL and AVIARY_PROJECT below, plus the build steps.
+#   4. Adjust the build steps below.
 #
 # Copy this file to .github/workflows/deploy.yml in your app's repository.
 
@@ -35,17 +34,20 @@ jobs:
           npm ci
           npm run build   # must emit static files into ./dist
 
+      - name: Install Aviary CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/aviary/bin"
+          gh release download \
+            --repo tupini07/aviary \
+            --pattern 'aviary_*_linux_amd64.zip' \
+            --dir "$RUNNER_TEMP/aviary"
+          archive=$(echo "$RUNNER_TEMP"/aviary/aviary_*_linux_amd64.zip)
+          unzip -q "$archive" -d "$RUNNER_TEMP/aviary/bin"
+          echo "$RUNNER_TEMP/aviary/bin" >> "$GITHUB_PATH"
+
       - name: Deploy to Aviary
         env:
-          AVIARY_URL: https://console.example.com
-          AVIARY_PROJECT: my-web-app
           AVIARY_KEY: ${{ secrets.AVIARY_KEY }}
-        run: |
-          # Tar the *contents* of dist (-C dist .) so paths land at pb_public root,
-          # then atomically deploy. Add ?clean=true to fully replace pb_public.
-          tar -C dist -czf - . | curl --fail --show-error --silent \
-            -X POST \
-            -H "Authorization: Bearer $AVIARY_KEY" \
-            -H "Content-Type: application/gzip" \
-            --data-binary @- \
-            "$AVIARY_URL/api/projects/$AVIARY_PROJECT/deploy"
+        run: aviary deploy

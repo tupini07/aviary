@@ -85,9 +85,8 @@ func (a *Aviary) controlHandler() http.Handler {
 	mux.HandleFunc("GET /api/projects/{id}/metrics", a.requireAuth(a.apiProjectMetrics))
 
 	// Project-scoped API keys: non-interactive credentials for agents/CI to
-	// drive the file (and future deploy) endpoints. Management is owner-only
-	// (superuser or granted collaborator); API keys themselves cannot manage
-	// keys.
+	// drive project automation endpoints. Management is owner-only (superuser
+	// or granted collaborator); API keys themselves cannot manage keys.
 	mux.HandleFunc("GET /api/projects/{id}/keys", a.requireAuth(a.apiListAPIKeys))
 	mux.HandleFunc("POST /api/projects/{id}/keys", a.requireAuth(a.apiCreateAPIKey))
 	mux.HandleFunc("DELETE /api/projects/{id}/keys/{keyId}", a.requireAuth(a.apiDeleteAPIKey))

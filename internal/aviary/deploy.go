@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -26,18 +27,17 @@ const (
 	maxDeployFiles = 5000
 )
 
-// deployResult summarizes a successful deploy.
+// deployResult summarizes a successful full replacement deploy.
 type deployResult struct {
-	Mode  string `json:"mode"` // "replace" or "overlay"
+	Mode  string `json:"mode"` // always "replace"; retained for API compatibility
 	Files int    `json:"files"`
 	Bytes int64  `json:"bytes"`
 }
 
 // apiDeployProject accepts a .tar.gz or .zip archive of a built site and
 // publishes it into the project's pb_public directory in a single atomic swap,
-// so the project is never left half-deployed. By default the archive is overlaid
-// on top of any existing files; with ?clean=true the directory is replaced
-// wholesale. Authorized like the file endpoints (superuser, granted
+// replacing the previous artifact set wholesale so the project is never left
+// half-deployed. Authorized like the file endpoints (superuser, granted
 // collaborator, or a project-scoped API key), making it the deploy target for
 // agents and CI.
 func (a *Aviary) apiDeployProject(w http.ResponseWriter, r *http.Request) {
@@ -48,8 +48,6 @@ func (a *Aviary) apiDeployProject(w http.ResponseWriter, r *http.Request) {
 	if !a.projectExists(w, r, id) {
 		return
 	}
-
-	clean := r.URL.Query().Get("clean") == "true"
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxDeployUpload)
 	data, err := io.ReadAll(r.Body)
@@ -75,24 +73,39 @@ func (a *Aviary) apiDeployProject(w http.ResponseWriter, r *http.Request) {
 	// exists (it was renamed into place), so RemoveAll is a harmless no-op.
 	defer func() { _ = os.RemoveAll(staging) }()
 
-	if !clean {
-		if err := copyTree(publicDir, staging); err != nil {
-			a.apiError(w, http.StatusInternalServerError, "cannot seed overlay: "+err.Error())
-			return
-		}
-	}
-
 	count, total, err := extractArchive(staging, data, format)
 	if err != nil {
 		a.apiError(w, http.StatusBadRequest, "invalid archive: "+err.Error())
 		return
 	}
+	if count == 0 {
+		a.apiError(w, http.StatusBadRequest, "invalid archive: deployment must contain at least one regular file")
+		return
+	}
 
-	// Enforce the project's storage quota against the fully-staged tree (which,
-	// for an overlay, includes the retained existing files) before swapping.
-	if p, perr := a.store.Get(r.Context(), id); perr == nil && p.QuotaBytes > 0 {
+	// Staging is unique to this request and can happen concurrently. Serialize
+	// only quota validation and publication with other pb_public mutations.
+	unlock, err := a.lockProjectFiles(r.Context(), id)
+	if err != nil {
+		a.apiError(w, http.StatusRequestTimeout, "deployment canceled while waiting to publish")
+		return
+	}
+	defer unlock()
+
+	// Enforce the project's storage quota against the fully-staged replacement
+	// tree before swapping. Fail closed if usage cannot be measured.
+	p, err := a.store.Get(r.Context(), id)
+	if err != nil {
+		a.apiError(w, http.StatusInternalServerError, "cannot check storage quota: "+err.Error())
+		return
+	}
+	if p.QuotaBytes > 0 {
 		staged, _, derr := dirSize(staging)
-		if derr == nil && !withinQuota(p.QuotaBytes, staged) {
+		if derr != nil {
+			a.apiError(w, http.StatusInternalServerError, "cannot measure staged deployment: "+derr.Error())
+			return
+		}
+		if !withinQuota(p.QuotaBytes, staged) {
 			a.apiError(w, http.StatusInsufficientStorage,
 				"storage quota exceeded: this deploy would use "+formatBytes(staged)+
 					" of the "+formatBytes(p.QuotaBytes)+" quota")
@@ -105,12 +118,27 @@ func (a *Aviary) apiDeployProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mode := "overlay"
-	if clean {
-		mode = "replace"
+	a.log.Info("deploy published", "project", id, "mode", "replace", "files", count, "bytes", total)
+	writeJSON(w, http.StatusOK, deployResult{Mode: "replace", Files: count, Bytes: total})
+}
+
+// lockProjectFiles serializes pb_public mutations for one project. The channel
+// semaphore makes waiting cancelable when the HTTP request goes away.
+func (a *Aviary) lockProjectFiles(ctx context.Context, id string) (func(), error) {
+	a.deployMu.Lock()
+	lock := a.deployLocks[id]
+	if lock == nil {
+		lock = make(chan struct{}, 1)
+		a.deployLocks[id] = lock
 	}
-	a.log.Info("deploy published", "project", id, "mode", mode, "files", count, "bytes", total)
-	writeJSON(w, http.StatusOK, deployResult{Mode: mode, Files: count, Bytes: total})
+	a.deployMu.Unlock()
+
+	select {
+	case lock <- struct{}{}:
+		return func() { <-lock }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // detectArchiveFormat sniffs an archive's magic bytes, returning "tgz", "zip" or
@@ -154,8 +182,13 @@ func extractTarGz(root string, data []byte) (int, int64, error) {
 		if err != nil {
 			return 0, 0, fmt.Errorf("tar: %w", err)
 		}
-		if hdr.Typeflag != tar.TypeReg {
-			continue // skip dirs, symlinks, devices, etc.
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			continue
+		case tar.TypeReg, tar.TypeRegA:
+			// handled below
+		default:
+			return 0, 0, fmt.Errorf("unsupported non-regular entry %q", hdr.Name)
 		}
 		n, err := writeArchiveFile(root, hdr.Name, tr, &count, total)
 		if err != nil {
@@ -176,6 +209,9 @@ func extractZip(root string, data []byte) (int, int64, error) {
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() {
 			continue
+		}
+		if !f.Mode().IsRegular() {
+			return 0, 0, fmt.Errorf("unsupported non-regular entry %q", f.Name)
 		}
 		rc, err := f.Open()
 		if err != nil {
@@ -249,58 +285,6 @@ func safeArchivePath(root, name string) (string, error) {
 		return "", fmt.Errorf("entry is not a file: %q", name)
 	}
 	return full, nil
-}
-
-// copyTree recursively copies the regular files under src into dst. A missing
-// src is treated as empty (nothing to copy).
-func copyTree(src, dst string) error {
-	info, err := os.Stat(src)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("%s is not a directory", src)
-	}
-	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		if !d.Type().IsRegular() {
-			return nil
-		}
-		return copyFile(path, target)
-	})
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
 }
 
 // swapDir atomically replaces publicDir with the already-populated staging

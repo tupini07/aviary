@@ -10,7 +10,7 @@
 #   AVIARY_URL=https://console.example.com \
 #   AVIARY_PROJECT=my-web-app \
 #   AVIARY_KEY=av_xxx \
-#   ./deploy.sh ./dist [--clean]
+#   ./deploy.sh ./dist
 #
 # Environment:
 #   AVIARY_URL      Base URL of the Aviary control plane (no trailing slash).
@@ -19,16 +19,10 @@
 #                   view of the control plane, or via POST /api/projects/{id}/keys.
 #
 # Arguments:
-#   $1              Directory whose *contents* become pb_public/ (default: dist).
-#   --clean         Replace pb_public entirely instead of overlaying (default
-#                   is overlay, which keeps files not present in the archive).
+#   $1              Directory whose *contents* replace pb_public/ (default: dist).
 set -eu
 
 DIST="${1:-dist}"
-QUERY=""
-if [ "${2:-}" = "--clean" ]; then
-	QUERY="?clean=true"
-fi
 
 : "${AVIARY_URL:?set AVIARY_URL to the control-plane base URL}"
 : "${AVIARY_PROJECT:?set AVIARY_PROJECT to the project id}"
@@ -47,7 +41,7 @@ tar -C "$DIST" -czf - . | curl --fail --show-error --silent \
 	-H "Authorization: Bearer $AVIARY_KEY" \
 	-H "Content-Type: application/gzip" \
 	--data-binary @- \
-	"$AVIARY_URL/api/projects/$AVIARY_PROJECT/deploy$QUERY"
+	"$AVIARY_URL/api/projects/$AVIARY_PROJECT/deploy"
 
 echo
 echo "Done."

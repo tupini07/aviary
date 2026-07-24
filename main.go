@@ -25,10 +25,17 @@ import (
 var version = "(untracked)"
 
 func main() {
-	// Subcommand dispatch must run before flag.Parse so `aviary update ...`
-	// can have its own flags without colliding with the server flags below.
-	if len(os.Args) > 1 && os.Args[1] == "update" {
-		os.Exit(runUpdate(os.Args[2:], version, os.Stdout))
+	// Subcommand dispatch must run before flag.Parse so each command can own its
+	// flags without colliding with the server flags below.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "update":
+			os.Exit(runUpdate(os.Args[2:], version, os.Stdout))
+		case "project":
+			os.Exit(runProject(os.Args[2:], defaultCLIContext()))
+		case "deploy":
+			os.Exit(runDeploy(os.Args[2:], defaultCLIContext()))
+		}
 	}
 
 	addr := flag.String("addr", envOr("AVIARY_ADDR", "127.0.0.1:8090"), "address for the Aviary front server")
@@ -37,6 +44,15 @@ func main() {
 	seed := flag.String("seed", envOr("AVIARY_SEED", ""), "comma-separated project ids to auto-provision on startup (dev convenience)")
 	allowPBPassword := flag.Bool("allow-dashboard-password", envBool("AVIARY_PB_PASSWORD_LOGIN", false), "keep PocketBase native superuser password login enabled on projects (default: only Aviary-minted token / SSO)")
 	showVersion := flag.Bool("version", false, "print the Aviary version and exit")
+	flag.Usage = func() {
+		fmt.Fprintln(flag.CommandLine.Output(), "Usage:")
+		fmt.Fprintln(flag.CommandLine.Output(), "  aviary [server flags]")
+		fmt.Fprintln(flag.CommandLine.Output(), "  aviary deploy [flags] [directory]")
+		fmt.Fprintln(flag.CommandLine.Output(), "  aviary project <init|credentials> ...")
+		fmt.Fprintln(flag.CommandLine.Output(), "  aviary update [flags]")
+		fmt.Fprintln(flag.CommandLine.Output(), "\nServer flags:")
+		flag.PrintDefaults()
+	}
 	flag.Parse()
 
 	if *showVersion {
