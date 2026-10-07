@@ -278,7 +278,6 @@ def private_database(path):
         with closing(sqlite3.connect(target, timeout=5)) as db:
             db.execute("BEGIN")
             yield db
-        require(hashes() == before, "SQLite source changed during private read")
 
 
 def read_digest(path):

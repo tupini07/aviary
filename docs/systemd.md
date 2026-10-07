@@ -189,10 +189,15 @@ on the source. Storage classes are hashed separately, so equal byte sequences
 stored as invalid-UTF-8 TEXT versus BLOB remain distinct.
 Even opening SQLite with `mode=ro` can create or alter source WAL/SHM files.
 All SQLite reads therefore use a private byte-for-byte DB/WAL/rollback-journal
-staging copy, verified against source hashes before/after copying and reading.
+staging copy, verified against source hashes before/after copying.
 SQLite replays journals and performs its backup API only on those private bytes;
 the final complete source/copy checks still reject concurrent multi-DB changes.
 Source SHM is never opened by SQLite or used as a persisted data substitute.
+After coherent capture, standalone readers use that private snapshot without
+requiring the live source to remain physically frozen throughout inspection.
+Later live writes or WAL checkpoints cannot change the captured snapshot.
+Whole-tree copying retains its outer physical/logical before/after guards;
+this is not a retry or an allowance for changed cutover state.
 
 Copied preflight runs under an isolated transient unit on the mounted volume
 with `PrivateNetwork=true` (only its own loopback, no external interfaces),

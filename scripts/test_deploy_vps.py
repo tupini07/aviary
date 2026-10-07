@@ -113,6 +113,20 @@ class TemporaryTest(unittest.TestCase):
 
 
 class StateTests(TemporaryTest):
+    def test_private_reader_keeps_captured_snapshot_without_freezing_later_source_writes(self):
+        source = self.root / "state"
+        create_state(source)
+        path = source / "control.db"
+        with d.private_database(path) as captured:
+            captured.text_factory = bytes
+            before = captured.execute("SELECT * FROM legacy").fetchall()
+            with closing(sqlite3.connect(path)) as writer:
+                writer.execute("UPDATE legacy SET value='later source write'")
+                writer.commit()
+            self.assertEqual(captured.execute("SELECT * FROM legacy").fetchall(), before)
+        with closing(sqlite3.connect(path)) as reader:
+            self.assertTrue(any(row[0] == "later source write" for row in reader.execute("SELECT value FROM legacy")))
+
     def test_full_snapshot_includes_invalid_utf8_schema_sequences_blobs_and_all_files(self):
         source = self.root / "state"
         create_state(source)
