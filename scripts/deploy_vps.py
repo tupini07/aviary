@@ -388,7 +388,22 @@ def project_count(state):
         return db.execute("SELECT count(*) FROM projects").fetchone()[0]
 
 
-def backup_configuration(text, unit):
+def backup_binary_configuration(text, previous, binary):
+    original = tomllib.loads(text)
+    expected = copy.deepcopy(original)
+    entries = [entry for entry in expected.get("files", []) if entry.get("label") == "aviary-current-binary"]
+    require(len(entries) == 1 and entries[0].get("path") == str(previous)
+            and text.count(json.dumps(str(previous))) == 1, "Backuper binary binding differs")
+    require(not any(entry.get("path") == str(binary) and entry is not entries[0]
+                    for section in ("files", "databases") for entry in expected.get(section, [])),
+            "Colliding Backuper binary source")
+    entries[0]["path"] = str(binary)
+    text = text.replace(json.dumps(str(previous)), json.dumps(str(binary)), 1)
+    require(tomllib.loads(text) == expected, "Unexpected settings changes during binary binding")
+    return text
+
+
+def backup_configuration(text, unit, binary=None):
     original = tomllib.loads(text)
     expected = copy.deepcopy(original)
     for section, label, relative in (
@@ -400,7 +415,7 @@ def backup_configuration(text, unit):
         ("files", "aviary-current-binary", None),
     ):
         old = str(LEGACY / "data" / relative) if relative else str(LEGACY / "aviary")
-        new = str(DATA / relative) if relative else str(ROOT / "current/aviary")
+        new = str(DATA / relative) if relative else str(binary or ROOT / "current/aviary")
         items = [item for item in expected.get(section, []) if item.get("label") == label]
         require(len(items) == 1 and items[0].get("path") == old
                 and text.count(json.dumps(old)) == 1, "Backuper Aviary coverage differs: " + label)
@@ -1056,10 +1071,16 @@ class Installer:
                 copy_state(self.stage / "state.before", self.data)
                 config, unit = backup_configuration(
                     base64.b64decode(watched[str(self.backup_config)]["body"]).decode("utf-8"),
-                    base64.b64decode(watched[str(self.backup_unit)]["body"]).decode("utf-8"))
+                    base64.b64decode(watched[str(self.backup_unit)]["body"]).decode("utf-8"),
+                    release / "aviary")
                 tx["changed"][str(self.env)] = base64.b64encode(CONFIGURATION).decode("ascii")
                 tx["changed"][str(self.backup_config)] = base64.b64encode(config.encode("utf-8")).decode("ascii")
                 tx["changed"][str(self.backup_unit)] = base64.b64encode(unit.encode("utf-8")).decode("ascii")
+            else:
+                config = backup_binary_configuration(
+                    base64.b64decode(watched[str(self.backup_config)]["body"]).decode("utf-8"),
+                    Path(tx["previous"]) / "aviary", release / "aviary")
+                tx["changed"][str(self.backup_config)] = base64.b64encode(config.encode("utf-8")).decode("ascii")
             tx["changed"][str(self.unit)] = base64.b64encode((release / "aviary.service").read_bytes()).decode("ascii")
             write_json(self.stage / "transaction.json", tx)
             require(state_manifest(self.data) == tx["state_before"], "Relocated stopped state differs")

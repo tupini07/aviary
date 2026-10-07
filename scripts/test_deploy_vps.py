@@ -322,6 +322,19 @@ class StateTests(TemporaryTest):
 
 
 class ArchiveAndConfigurationTests(TemporaryTest):
+    def test_binary_backup_binds_immutable_releases_without_following_current_symlink(self):
+        text, unit = backup_inputs()
+        previous = d.ROOT / "releases" / ("b" * 40 + "-" + "b" * 16) / "aviary"
+        current = d.ROOT / "releases" / ("a" * 40 + "-" + "a" * 16) / "aviary"
+        installed, _ = d.backup_configuration(text, unit, previous)
+        self.assertNotIn(str(d.ROOT / "current/aviary"), installed)
+        updated = d.backup_binary_configuration(installed, previous, current)
+        expected = d.tomllib.loads(installed)
+        next(entry for entry in expected["files"] if entry["label"] == "aviary-current-binary")["path"] = str(current)
+        self.assertEqual(d.tomllib.loads(updated), expected)
+        with self.assertRaises(d.DeploymentError):
+            d.backup_binary_configuration(installed, d.ROOT / "current/aviary", current)
+
     def test_unsafe_archive_paths_links_duplicates_and_aliases_refused(self):
         for names in (("../bad",), ("/bad",), ("a/./b",), ("a//b",), ("a\\b",),
                       ("file", "file"), ("a", "a/b")):
@@ -898,6 +911,9 @@ class TransactionTests(TemporaryTest):
         self.previous = i.root / "releases" / ("b" * 40)
         create_release(self.release)
         create_release(self.previous, "b" * 40)
+        text, unit = d.backup_configuration(text, unit, self.previous / "aviary")
+        i.backup_config.write_text(text)
+        i.backup_unit.write_text(unit)
         i.release = self.release
         i.env.write_bytes(d.CONFIGURATION)
         i.unit.write_bytes((self.previous / "aviary.service").read_bytes())
@@ -918,6 +934,9 @@ class TransactionTests(TemporaryTest):
         self.assertEqual(d.state_manifest(self.installer.data), before)
         self.assertTrue(self.installer.pending.exists())
         self.assertEqual(json.loads((self.installer.stage / "deployment.json").read_text())["status"], "healthy")
+        binary = next(entry for entry in d.tomllib.loads(self.installer.backup_config.read_text())["files"]
+                      if entry["label"] == "aviary-current-binary")
+        self.assertEqual(binary["path"], str(self.release / "aviary"))
         calls = self.installer.calls
         self.assertLess(calls.index(["systemctl", "stop", "aviary.service"]),
                         calls.index(["systemctl", "start", "aviary.service"]))
@@ -1009,6 +1028,9 @@ class TransactionTests(TemporaryTest):
 
     def test_initial_failure_recovers_intact_original_without_touching_parent_or_restoring_data(self):
         i = self.installer
+        text, unit = backup_inputs()
+        i.backup_config.write_text(text)
+        i.backup_unit.write_text(unit)
         i.current.unlink()
         i.env.unlink()
         i.unit.unlink()
@@ -1041,6 +1063,9 @@ class TransactionTests(TemporaryTest):
 
     def test_successful_initial_activation_retargets_backups_and_retains_original(self):
         i = self.installer
+        text, unit = backup_inputs()
+        i.backup_config.write_text(text)
+        i.backup_unit.write_text(unit)
         i.current.unlink()
         i.env.unlink()
         i.unit.unlink()
@@ -1056,6 +1081,7 @@ class TransactionTests(TemporaryTest):
         self.assertEqual(i.env.read_bytes(), d.CONFIGURATION)
         self.assertIn(str(d.DATA), i.backup_config.read_text())
         self.assertIn("aviary-configuration", i.backup_config.read_text())
+        self.assertIn(str(self.release / "aviary"), i.backup_config.read_text())
         self.assertNotIn(str(d.LEGACY / "data"), i.backup_unit.read_text())
         self.assertEqual(i.current.resolve(), self.release)
 

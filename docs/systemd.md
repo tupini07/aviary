@@ -159,14 +159,20 @@ Initial retargeting changes only the paths of Backuper's existing
 `aviary-control`, `aviary-projects`, `aviary-auxiliary`, `aviary-project-files`,
 `aviary-exports` and `aviary-current-binary` entries. State-relative paths map
 from original `data` to `aviary-state`; the binary maps to
-`/opt/aviary/current/aviary`. It adds a files entry `aviary-configuration` for
-``/etc/aviary/aviary.env`. It also backs up optional PocketBase export `.zip.attrs`
+the concrete immutable release executable. It adds a files entry `aviary-configuration` for
+`/etc/aviary/aviary.env`. It also backs up optional PocketBase export `.zip.attrs`
 sidecars as `aviary-export-metadata`. All other entries, destinations, exclusion lists,
 `required=false`, settings and secret bytes are preserved. The single Backuper
 `ReadWritePaths` line retargets exactly the old data root and its
 `projects/backuper-info` and `projects/lgspkb` parents; all other permission
 tokens remain unchanged. The new root covers future project subdirectories.
 Backuper's running code remains unchanged.
+The source profile's logical `/opt/aviary/current/aviary` entry is bound to the
+actual verified `/opt/aviary/releases/<revision>-<hash>/aviary` path in installed
+configuration. Initial activation and every real update change that binding
+under the shared backup lock; unchanged-release no-ops leave it untouched.
+Backuper's existing no-symlinks rule remains enforced. Recovery restores the
+previous binding with the previous release, never a stale database.
 
 Copied snapshots use SQLite's WAL-safe backup API for Aviary's control and
 project `data.db`/`auxiliary.db` stores and cover every database
