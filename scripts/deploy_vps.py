@@ -648,6 +648,23 @@ def maintenance_configuration(text):
     return result
 
 
+def canonical_caddy_adaptation(configuration, source, target):
+    result = copy.deepcopy(configuration)
+
+    def visit(value):
+        if isinstance(value, dict):
+            if value.get("handler") == "file_server" and isinstance(value.get("hide"), list):
+                value["hide"] = [str(target) if item == str(source) else item for item in value["hide"]]
+            for item in value.values():
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(result)
+    return result
+
+
 @contextmanager
 def deployment_locks(root=ROOT, backup_lock=Path("/var/lib/backuper/job.lock")):
     safe_path(backup_lock, "file")
@@ -888,14 +905,18 @@ class Installer:
         candidate_path = self.stage / "Caddyfile.maintenance"
         private_write(candidate_path, candidate)
         self.run(["caddy", "validate", "--config", str(candidate_path), "--adapter", "caddyfile"])
-        candidate_adapted = json.loads(self.run(
-            ["caddy", "adapt", "--config", str(candidate_path), "--adapter", "caddyfile"]))
+        candidate_adapted = canonical_caddy_adaptation(json.loads(self.run(
+            ["caddy", "adapt", "--config", str(candidate_path), "--adapter", "caddyfile"])),
+            candidate_path, self.caddy)
         installed = dict(original, body=base64.b64encode(candidate).decode("ascii"))
         self.maintenance_records = (original, installed, before_live, candidate_adapted)
         try:
             require(file_record(self.caddy) == original and self.caddy_live() == before_live,
                     "Operator changed Caddy before maintenance")
             restore_record(self.caddy, installed)
+            require(json.loads(self.run(["caddy", "adapt", "--config", str(self.caddy),
+                                         "--adapter", "caddyfile"])) == candidate_adapted,
+                    "Installed Caddy adaptation differs from reviewed maintenance")
             self.run(["caddy", "reload", "--config", str(self.caddy), "--adapter", "caddyfile"])
             require(json.loads(self.caddy_live()) == candidate_adapted, "Maintenance live adaptation differs")
             self.record("maintenance")

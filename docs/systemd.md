@@ -204,6 +204,10 @@ other named services are untouched. The candidate is validated, reloaded and
 checked live **before** the original is stopped. Caddy disk bytes, attributes
 and live response bytes are restored in `finally`. Operator disk/live edits
 are never overwritten and require manual route recovery.
+Caddy automatically inserts the adapter input filename into `file_server.hide`.
+The private candidate's generated hide entries are normalized to the live
+Caddyfile path, then checked against adaptation of the actual installed file
+before reload. Other hide entries and unrelated routing remain unchanged.
 
 Managed stop uses the runtime's accepted-HTTP/cron drain and termination-hook
 flush. `MainPID=0` and an empty remaining service cgroup are required before

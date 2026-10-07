@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import signal
 import sqlite3
+import copy
 import subprocess
 import tarfile
 import tempfile
@@ -375,6 +376,21 @@ class ArchiveAndConfigurationTests(TemporaryTest):
                        "\n" + original, original + "extra { reverse_proxy :8090 }\n"):
             with self.assertRaises(d.DeploymentError):
                 d.maintenance_configuration(broken)
+
+    def test_caddy_candidate_normalizes_only_generated_file_server_config_hides(self):
+        source, target = Path("/private/Caddyfile.maintenance"), Path("/etc/caddy/Caddyfile")
+        original = {"routes": [
+            {"handler": "file_server", "hide": [str(source), ".env", str(source) + ".other"]},
+            {"handler": "subroute", "routes": [
+                {"handler": "file_server", "hide": [str(source)]},
+                {"handler": "static_response", "body": str(source), "hide": [str(source)]},
+            ]},
+        ]}
+        expected = copy.deepcopy(original)
+        expected["routes"][0]["hide"][0] = str(target)
+        expected["routes"][1]["routes"][0]["hide"][0] = str(target)
+        self.assertEqual(d.canonical_caddy_adaptation(original, source, target), expected)
+        self.assertEqual(original["routes"][0]["hide"][0], str(source))
 
     def test_backup_lock_is_opened_readonly_before_deploy_lock_without_inode_or_mode_changes(self):
         lock = self.root / "job.lock"
