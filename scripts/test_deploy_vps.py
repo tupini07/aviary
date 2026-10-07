@@ -541,18 +541,18 @@ class LegacyGuardTests(TemporaryTest):
         (process / "net/udp6").write_text(header + row("111", "07"))
         self.assertEqual([x[0] for x in d.owned_connections(123, self.root)], ["tcp", "udp6"])
 
-    def test_writer_review_requires_exact_identity_state_and_bounded_explicit_schedule_window(self):
+    def test_schedule_review_requires_risk_acknowledgement_identity_state_and_bounded_window(self):
         proof = {"format": 1, "legacy": {"pid": 123}, "state_manifest": {"complete": "digest"},
-                 "not_before": 100, "not_after": 2000, "no_pending_async_work": True,
+                 "not_before": 100, "not_after": 2000, "legacy_shutdown_risk_accepted": True,
                  "scheduled_writers_excluded": True, "reviewed_schedules": ["backup", "optimization", "log flush"]}
-        d.validate_writer_proof(proof, proof["legacy"], proof["state_manifest"], 200)
+        d.validate_schedule_review(proof, proof["legacy"], proof["state_manifest"], 200)
         for changes in ({"state_manifest": {}}, {"legacy": {}}, {"not_after": 201},
-                        {"not_after": 5000}, {"no_pending_async_work": False},
+                        {"not_after": 5000}, {"legacy_shutdown_risk_accepted": False},
                         {"scheduled_writers_excluded": False}, {"reviewed_schedules": []}):
             with self.assertRaises(d.DeploymentError):
-                d.validate_writer_proof(dict(proof, **changes), proof["legacy"], proof["state_manifest"], 200)
+                d.validate_schedule_review(dict(proof, **changes), proof["legacy"], proof["state_manifest"], 200)
         with self.assertRaises(d.DeploymentError):
-            d.validate_writer_proof(None, proof["legacy"], proof["state_manifest"], 200)
+            d.validate_schedule_review(None, proof["legacy"], proof["state_manifest"], 200)
 
     def quiet_fixture(self):
         stage = self.root / "receipt"
@@ -562,7 +562,7 @@ class LegacyGuardTests(TemporaryTest):
         legacy = {"app": {"pid": 123}, "parent": {"pid": 456}}
         manifest = d.state_manifest(installer.legacy / "data")
         proof = {"format": 1, "legacy": legacy, "state_manifest": manifest,
-                 "not_before": 1000, "not_after": 2600, "no_pending_async_work": True,
+                 "not_before": 1000, "not_after": 2600, "legacy_shutdown_risk_accepted": True,
                  "scheduled_writers_excluded": True, "reviewed_schedules": ["backup", "optimization", "log"]}
         return installer, legacy, manifest, proof
 
@@ -686,6 +686,22 @@ class ClientBuildTests(TemporaryTest):
             with patch.object(d, "build_source") as build, patch.object(d, "ssh") as ssh:
                 with self.assertRaises(d.DeploymentError):
                     d.deploy(d.parser().parse_args(arguments))
+            build.assert_not_called()
+            ssh.assert_not_called()
+
+    def test_initial_cutover_requires_both_schedule_review_and_risk_acknowledgement(self):
+        base = ["--yes", "--migrate-tmux", "--legacy-pid", "123", "--parent-pid", "456",
+                "--legacy-sha256", d.VENDOR["binary_sha256"]]
+        for extra in (["--accept-legacy-shutdown-risk"],
+                      ["--legacy-schedule-review", "/review.json"]):
+            with patch.object(d, "build_source") as build, patch.object(d, "ssh") as ssh:
+                with self.assertRaisesRegex(d.DeploymentError, "requires --accept-legacy"):
+                    d.deploy(d.parser().parse_args(base + extra))
+                build.assert_not_called()
+                ssh.assert_not_called()
+        with patch.object(d, "build_source") as build, patch.object(d, "ssh") as ssh:
+            with self.assertRaises(d.DeploymentError):
+                d.deploy(d.parser().parse_args(["--yes", "--accept-legacy-shutdown-risk"]))
             build.assert_not_called()
             ssh.assert_not_called()
 

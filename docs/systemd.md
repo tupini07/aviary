@@ -37,7 +37,8 @@ python3 -B scripts/deploy_vps.py --yes --migrate-tmux \
   --legacy-pid 3944047 --parent-pid 1608151 \
   --legacy-sha256 13200be63d2ba3aaecc5d8d2c8663c11bbe8e3a40e147b7c46fdbf7b3796e019 \
   --vendor-archive /absolute/path/aviary_0.4.0_linux_amd64.zip \
-  --legacy-writer-proof /absolute/path/reviewed-writer-window.json
+  --accept-legacy-shutdown-risk \
+  --legacy-schedule-review /absolute/path/reviewed-schedule-window.json
 ```
 
 PIDs above describe the reviewed original and **must be reverified**, not assumed
@@ -52,8 +53,8 @@ initial mode downloads only the pinned official GitHub URL in `deploy/vendor.jso
 with HTTPS redirects restricted to GitHub's release-asset host. Both zip SHA256
 `cd92f7b0b4fb845997d9be9a19e083d63a3256593bb249b9b45ce17a6e64580b` and embedded
 binary SHA256 above must match. The zip is retained in the private remote receipt;
-it is not executed as the managed build. Legacy flags, vendor archive and writer
-proof are rejected outside `--migrate-tmux`.
+it is not executed as the managed build. Legacy flags, vendor archive, schedule
+review and risk acknowledgement are rejected outside `--migrate-tmux`.
 
 The build pipeline runs native `CGO_ENABLED=0` non-race Go tests, `CGO_ENABLED=1`
 race tests, Go vet, and the Python regression suite, always with
@@ -70,7 +71,7 @@ interface, invoked from the uploaded **committed** updater by a transient
 `aviary-deploy-<32hex>` oneshot unit. Do not run it manually on a pending receipt.
 The durable receipt has mode 0700 and contains `source.tar`, `release.tar`,
 `request.json`, the updater, initial `official.zip` and optional
-`writer-proof.json`, private logs, Caddy before/candidate configurations,
+`schedule-review.json`, private logs, Caddy before/candidate configurations,
 `transaction.json`, `deployment.json`, and the coordinated `state.before` copy.
 The installer survives loss of SSH; loss of the waiting client is not evidence
 that the installer stopped.
@@ -82,17 +83,19 @@ checks. The installer executes it through `nsenter --target <copied MainPID> --n
 inside the copied process's private network namespace. Origins, revision, count
 and asset path are strictly validated; this is not an arbitrary URL/file probe.
 
-## Initial legacy writer safety gate
+## Initial legacy shutdown risk and schedule gate
 
 **Quiet sockets and stable databases do not prove that a stripped legacy Go
 process has no queued SMTP or other unsocketed asynchronous work.** The original
 has no graceful drain API; the updater neither uses SIGSTOP, forced SIGKILL nor
-Delve to manufacture that guarantee. Initial activation requires a separate,
-explicitly reviewed, short-lived writer-window attestation. Copied rehearsal
-does not require it. Until the pending-work and built-in writer schedule review
-is genuinely complete, initial activation is blocked.
+Delve to manufacture that guarantee. Initial activation requires the operator's
+explicit `--accept-legacy-shutdown-risk` acknowledgement: any remaining background
+task may be interrupted by the original release's SIGTERM exit. This is a
+one-time initial-migration risk acceptance, not a claim that pending work is
+absent or permission to bypass the other guards. A separate, explicitly reviewed,
+short-lived schedule window is also required. Copied rehearsal needs neither.
 
-`--legacy-writer-proof` is a JSON object with this exact semantic contract:
+`--legacy-schedule-review` is a JSON object with this exact semantic contract:
 
 | Key | Required value |
 | --- | --- |
@@ -100,16 +103,16 @@ is genuinely complete, initial activation is blocked.
 | `legacy` | `{"app": <process_identity(legacy_pid)>, "parent": <process_identity(parent_pid)>}` |
 | `state_manifest` | Complete `state_manifest(original/data)` result |
 | `not_before`, `not_after` | Unix epoch seconds; already valid and at least 900 seconds remaining at the final guard; total window at most 3600 seconds |
-| `no_pending_async_work` | `true`, only after independent pending-work review |
+| `legacy_shutdown_risk_accepted` | `true`, recording explicit operator approval of the disclosed residual risk |
 | `scheduled_writers_excluded` | `true`, only after independent schedule-window review |
 | `reviewed_schedules` | At least three nonempty review descriptions covering PocketBase backup, optimization and delayed log flushing, including relevant settings and actual schedules |
 
 `process_identity()` returns `pid`, `parent`, `start` (Linux starttime string),
-`exe`, `cwd`, `argv` (base64-encoded argument bytes), and `sha256`. The attestation
+`exe`, `cwd`, `argv` (base64-encoded argument bytes), and `sha256`. The review
 is bound to those exact identities and all logical state/file contents. It is
-**review evidence, not an automatically generated proof of an inaccessible Go
-queue**. Do not set assertions based solely on absence of network traffic.
-There is deliberately no unsafe override or stale-state allowance.
+**schedule review evidence and risk acknowledgement, not proof of an inaccessible
+Go queue**. Do not invent a `no_pending_async_work` assertion. There is no
+stale-state allowance or override for process, schedule, socket or state checks.
 
 Under maintenance the updater also requires zero control cron jobs, no project
 JS-hook files, and repeatedly identical complete logical state. It inspects

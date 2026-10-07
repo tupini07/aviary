@@ -621,21 +621,21 @@ def owned_connections(pid, proc_root=Path("/proc")):
     return connections
 
 
-def validate_writer_proof(proof, legacy, manifest, now):
+def validate_schedule_review(proof, legacy, manifest, now):
     require(isinstance(proof, dict) and proof.get("format") == 1
             and proof.get("legacy") == legacy
             and proof.get("state_manifest") == manifest,
-            "Writer review is not bound to this exact legacy process/state")
+            "Schedule review is not bound to this exact legacy process/state")
     begin, end = proof.get("not_before"), proof.get("not_after")
     require(type(begin) in (int, float) and type(end) in (int, float)
             and begin <= now and end >= now + 900 and end - begin <= 3600,
-            "Writer review must cover cutover plus 900 seconds, at most one hour")
-    require(proof.get("no_pending_async_work") is True
+            "Schedule review must cover cutover plus 900 seconds, at most one hour")
+    require(proof.get("legacy_shutdown_risk_accepted") is True
             and proof.get("scheduled_writers_excluded") is True
             and isinstance(proof.get("reviewed_schedules"), list)
             and all(isinstance(x, str) and x.strip() for x in proof["reviewed_schedules"])
             and len(proof["reviewed_schedules"]) >= 3,
-            "Review pending SMTP/work and built-in backup, optimization and log schedules explicitly")
+            "Acknowledge residual legacy shutdown risk and review backup, optimization and log schedules explicitly")
 
 
 def maintenance_configuration(text):
@@ -846,7 +846,7 @@ class Installer:
     def legacy_quiet(self, legacy, proof):
         source = self.legacy / "data"
         baseline = state_manifest(source)
-        validate_writer_proof(proof, legacy, baseline, time.time())
+        validate_schedule_review(proof, legacy, baseline, time.time())
         with private_database(source / "control.db") as db:
             require(db.execute("SELECT count(*) FROM cron_jobs").fetchone()[0] == 0,
                     "Initial migration requires zero control cron jobs")
@@ -863,7 +863,7 @@ class Installer:
             now = time.monotonic()
             quiet_since = (quiet_since if quiet_since is not None else now) if idle else None
             if quiet_since is not None and now - quiet_since >= QUIET_SECONDS:
-                validate_writer_proof(proof, legacy, current, time.time())
+                validate_schedule_review(proof, legacy, current, time.time())
                 require(not owned_connections(legacy["app"]["pid"]), "Legacy network work resumed")
                 return baseline
             require(now < deadline, "All-process TCP/UDP and delayed log work did not quiesce")
@@ -1237,12 +1237,14 @@ class Installer:
                 source = self.legacy / "data"
                 backup_configuration(self.backup_config.read_text(), self.backup_unit.read_text())
                 vendor_binary(self.stage / "official.zip")
-                if metadata.get("writer_proof_sha256"):
-                    require(checksum(self.stage / "writer-proof.json") == metadata["writer_proof_sha256"],
-                            "Writer-review upload checksum differs")
-                    proof = json.loads((self.stage / "writer-proof.json").read_text())
+                if metadata.get("schedule_review_sha256"):
+                    require(checksum(self.stage / "schedule-review.json") == metadata["schedule_review_sha256"],
+                            "Schedule-review upload checksum differs")
+                    proof = json.loads((self.stage / "schedule-review.json").read_text())
                 if not metadata["rehearse"]:
-                    validate_writer_proof(proof, legacy, state_manifest(source), time.time())
+                    require(metadata.get("legacy_shutdown_risk_accepted") is True,
+                            "Initial activation requires explicit legacy shutdown risk acknowledgement")
+                    validate_schedule_review(proof, legacy, state_manifest(source), time.time())
             else:
                 require(self.current.is_symlink(), "Unknown current layout")
                 previous = self.current.resolve()
@@ -1405,11 +1407,12 @@ def deploy(args):
                 and type(args.parent_pid) is int and args.parent_pid > 1
                 and args.parent_pid != args.legacy_pid and args.legacy_sha256 == VENDOR["binary_sha256"],
                 "Initial migration requires exact --legacy-pid, --parent-pid and official --legacy-sha256")
-        require(args.rehearse or args.legacy_writer_proof,
-                "Initial activation requires --legacy-writer-proof; quiet sockets alone cannot prove stripped legacy drain")
+        require(args.rehearse or (args.accept_legacy_shutdown_risk and args.legacy_schedule_review),
+                "Initial activation requires --accept-legacy-shutdown-risk and --legacy-schedule-review; "
+                "quiet sockets cannot prove absence of pending legacy work")
     else:
         require(not any((args.legacy_pid, args.parent_pid, args.legacy_sha256,
-                         args.legacy_writer_proof, args.vendor_archive)),
+                         args.legacy_schedule_review, args.accept_legacy_shutdown_risk, args.vendor_archive)),
                 "Legacy arguments are only valid with --migrate-tmux")
     repository = Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory(prefix="aviary-deploy-") as temporary:
@@ -1421,16 +1424,17 @@ def deploy(args):
         if args.migrate_tmux:
             obtain_vendor(directory / "official.zip", args.vendor_archive)
             uploads.append(directory / "official.zip")
-            if args.legacy_writer_proof:
-                safe_path(args.legacy_writer_proof, "file")
-                shutil.copyfile(args.legacy_writer_proof, directory / "writer-proof.json")
-                proof_hash = checksum(directory / "writer-proof.json")
-                uploads.append(directory / "writer-proof.json")
+            if args.legacy_schedule_review:
+                safe_path(args.legacy_schedule_review, "file")
+                shutil.copyfile(args.legacy_schedule_review, directory / "schedule-review.json")
+                proof_hash = checksum(directory / "schedule-review.json")
+                uploads.append(directory / "schedule-review.json")
         write_json(directory / "request.json", {
             "revision": revision, "archive_sha256": checksum(directory / "release.tar"),
             "source_sha256": checksum(directory / "source.tar"), "migrate_tmux": args.migrate_tmux,
             "rehearse": args.rehearse, "legacy_pid": args.legacy_pid, "parent_pid": args.parent_pid,
-            "legacy_sha256": args.legacy_sha256, "writer_proof_sha256": proof_hash,
+            "legacy_sha256": args.legacy_sha256, "schedule_review_sha256": proof_hash,
+            "legacy_shutdown_risk_accepted": args.accept_legacy_shutdown_risk,
         })
         uploads.append(directory / "request.json")
         identifier = uuid.uuid4().hex
@@ -1457,7 +1461,8 @@ def parser():
     result.add_argument("--parent-pid", type=int)
     result.add_argument("--legacy-sha256")
     result.add_argument("--vendor-archive", type=Path)
-    result.add_argument("--legacy-writer-proof", type=Path)
+    result.add_argument("--legacy-schedule-review", type=Path)
+    result.add_argument("--accept-legacy-shutdown-risk", action="store_true")
     return result
 
 
