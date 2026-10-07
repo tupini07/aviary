@@ -11,10 +11,12 @@ import (
 	"io"
 	"log"
 	"log/slog"
-	"net/http"
+	"net"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/tupini07/aviary/internal/aviary"
@@ -25,6 +27,13 @@ import (
 var version = "(untracked)"
 
 func main() {
+	if err := runMain(); err != nil {
+		log.Printf("aviary: %v", err)
+		os.Exit(1)
+	}
+}
+
+func runMain() error {
 	// Subcommand dispatch must run before flag.Parse so each command can own its
 	// flags without colliding with the server flags below.
 	if len(os.Args) > 1 {
@@ -43,6 +52,8 @@ func main() {
 	idleTTL := flag.Duration("idle-ttl", envDuration("AVIARY_IDLE_TTL", 5*time.Minute), "evict a project's app after this much inactivity")
 	seed := flag.String("seed", envOr("AVIARY_SEED", ""), "comma-separated project ids to auto-provision on startup (dev convenience)")
 	allowPBPassword := flag.Bool("allow-dashboard-password", envBool("AVIARY_PB_PASSWORD_LOGIN", false), "keep PocketBase native superuser password login enabled on projects (default: only Aviary-minted token / SSO)")
+	requireExisting := flag.Bool("require-existing", envBool("AVIARY_REQUIRE_EXISTING", false), "require existing state and validate the control schema without migrations")
+	disableCron := flag.Bool("disable-cron", envBool("AVIARY_DISABLE_CRON", false), "disable control-plane scheduling for isolated rehearsals")
 	showVersion := flag.Bool("version", false, "print the Aviary version and exit")
 	flag.Usage = func() {
 		fmt.Fprintln(flag.CommandLine.Output(), "Usage:")
@@ -57,17 +68,27 @@ func main() {
 
 	if *showVersion {
 		log.Printf("aviary %s", version)
-		return
+		return nil
 	}
+
+	listener, err := net.Listen("tcp", *addr)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	defer listener.Close()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	av, err := aviary.New(aviary.Config{
 		DataDir:                *dataDir,
 		IdleTTL:                *idleTTL,
 		Logger:                 slog.Default(),
 		AllowDashboardPassword: *allowPBPassword,
+		RequireExisting:        *requireExisting,
+		DisableCron:            *disableCron,
 	})
 	if err != nil {
-		log.Fatalf("aviary: init: %v", err)
+		return fmt.Errorf("init: %w", err)
 	}
 	defer av.Shutdown()
 
@@ -79,16 +100,10 @@ func main() {
 	printHeader(os.Stdout, version)
 
 	slog.Info("Aviary up", "version", version, "addr", *addr, "data", *dataDir, "idleTTL", idleTTL.String())
+	slog.Info("runtime mode", "requireExisting", *requireExisting, "cronEnabled", !*disableCron)
 	slog.Info("control plane", "cmd", "curl -s http://"+*addr+"/")
 
-	srv := &http.Server{
-		Addr:              *addr,
-		Handler:           av,
-		ReadHeaderTimeout: 30 * time.Second,
-	}
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatal(err)
-	}
+	return serveAviary(ctx, listener, av, !*disableCron)
 }
 
 // printHeader writes an ASCII banner identifying Aviary and its build version

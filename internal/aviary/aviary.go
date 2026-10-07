@@ -46,6 +46,9 @@ type Config struct {
 	// project dashboard is an Aviary-minted token (see dashboard SSO), which
 	// removes the password brute-force surface entirely.
 	AllowDashboardPassword bool
+
+	RequireExisting bool
+	DisableCron     bool
 }
 
 // Aviary is the multi-tenant registry and HTTP front. It implements
@@ -75,6 +78,14 @@ type Aviary struct {
 
 	quit chan struct{}
 	wg   sync.WaitGroup
+
+	workMu        sync.Mutex
+	stopping      bool
+	work          sync.WaitGroup
+	stopOnce      sync.Once
+	shutdownOnce  sync.Once
+	streamContext context.Context
+	cancelStreams context.CancelFunc
 }
 
 // controlLabel is the canonical control-plane subdomain label. It is a valid
@@ -106,11 +117,23 @@ func New(cfg Config) (*Aviary, error) {
 	}
 
 	projectsDir := filepath.Join(cfg.DataDir, "projects")
+	if cfg.RequireExisting {
+		for _, directory := range []string{cfg.DataDir, projectsDir} {
+			info, err := os.Lstat(directory)
+			if err != nil || !info.IsDir() {
+				return nil, fmt.Errorf("aviary: existing state directory required: %s", directory)
+			}
+		}
+	}
 	if err := os.MkdirAll(projectsDir, 0o755); err != nil {
 		return nil, fmt.Errorf("aviary: create projects dir: %w", err)
 	}
 
-	store, err := controlplane.Open(filepath.Join(cfg.DataDir, "control.db"))
+	openStore := controlplane.Open
+	if cfg.RequireExisting {
+		openStore = controlplane.OpenExisting
+	}
+	store, err := openStore(filepath.Join(cfg.DataDir, "control.db"))
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +142,7 @@ func New(cfg Config) (*Aviary, error) {
 	// survive process restarts.
 	sessionKey, err := store.SessionKey(context.Background())
 	if err != nil {
+		_ = store.Close()
 		return nil, err
 	}
 
@@ -136,6 +160,7 @@ func New(cfg Config) (*Aviary, error) {
 	a.suPasskeySessions = newSUSessionStore()
 	a.ssoTickets = newTicketStore()
 	a.cronRunning = make(map[string]struct{})
+	a.streamContext, a.cancelStreams = context.WithCancel(context.Background())
 	a.control = a.controlHandler()
 
 	a.wg.Add(1)
@@ -143,8 +168,10 @@ func New(cfg Config) (*Aviary, error) {
 
 	// Load and start the control-plane cron scheduler. Failure to load jobs is
 	// logged but non-fatal: the rest of the control plane still works.
-	if err := a.startCron(); err != nil {
-		a.log.Warn("failed to start cron scheduler", "error", err)
+	if !cfg.DisableCron {
+		if err := a.startCron(); err != nil {
+			a.log.Warn("failed to start cron scheduler", "error", err)
+		}
 	}
 
 	return a, nil
@@ -154,6 +181,18 @@ func New(cfg Config) (*Aviary, error) {
 // the Host header. Requests without a project subdomain hit the control-plane
 // landing page. Only provisioned, active projects are served.
 func (a *Aviary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !a.beginWork() {
+		http.Error(w, "server shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	defer a.work.Done()
+	if r.Method == http.MethodGet && strings.TrimRight(r.URL.Path, "/") == "/api/realtime" {
+		ctx, cancel := context.WithCancel(r.Context())
+		stop := context.AfterFunc(a.streamContext, cancel)
+		defer stop()
+		defer cancel()
+		r = r.WithContext(ctx)
+	}
 	id := projectID(r.Host)
 	if id == "" || reserved[id] {
 		a.control.ServeHTTP(w, r)
@@ -318,34 +357,61 @@ func (a *Aviary) evictIdle() {
 	}
 }
 
-// Shutdown stops the reaper, gracefully stops every running project and closes
-// the control-plane store.
-func (a *Aviary) Shutdown() {
-	select {
-	case <-a.quit:
-		// already shut down
-	default:
+func (a *Aviary) beginWork() bool {
+	a.workMu.Lock()
+	defer a.workMu.Unlock()
+	if a.stopping {
+		return false
+	}
+	a.work.Add(1)
+	return true
+}
+
+func (a *Aviary) Health(ctx context.Context) (int, error) {
+	if !a.beginWork() {
+		return 0, errors.New("aviary: shutting down")
+	}
+	defer a.work.Done()
+	projects, err := a.ListProjects(ctx)
+	return len(projects), err
+}
+
+// BeginShutdown stops admission and scheduling, cancelling only realtime streams.
+func (a *Aviary) BeginShutdown() {
+	a.stopOnce.Do(func() {
+		a.workMu.Lock()
+		a.stopping = true
+		a.workMu.Unlock()
+		a.cancelStreams()
 		close(a.quit)
-	}
-	if a.cron != nil {
-		a.cron.Stop()
-	}
-	a.wg.Wait()
-
-	a.mu.Lock()
-	cages := a.cages
-	a.cages = make(map[string]*cage)
-	a.mu.Unlock()
-
-	for _, c := range cages {
-		if c.isReady() {
-			c.stop(a.log)
+		if a.cron != nil {
+			a.cron.Stop()
 		}
-	}
+	})
+}
 
-	if err := a.store.Close(); err != nil {
-		a.log.Warn("error closing control-plane store", "error", err)
-	}
+// Shutdown joins accepted requests, cron executions and the reaper before stores close.
+func (a *Aviary) Shutdown() {
+	a.shutdownOnce.Do(func() {
+		a.BeginShutdown()
+		a.wg.Wait()
+		a.work.Wait()
+
+		a.mu.Lock()
+		cages := a.cages
+		a.cages = make(map[string]*cage)
+		a.mu.Unlock()
+
+		for _, c := range cages {
+			if c.isReady() {
+				c.stop(a.log)
+			}
+		}
+
+		if err := a.store.Close(); err != nil {
+			a.log.Warn("error closing control-plane store", "error", err)
+		}
+	})
 }
 
 // projectID extracts the project identifier from a request Host header: the

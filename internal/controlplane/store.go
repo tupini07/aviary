@@ -11,6 +11,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -73,7 +76,30 @@ type Store struct {
 // Open opens (creating if needed) the control-plane database at path and
 // ensures its schema exists.
 func Open(path string) (*Store, error) {
-	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)"
+	return open(path, false)
+}
+
+// OpenExisting validates an existing store without creating or migrating it.
+func OpenExisting(path string) (*Store, error) {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		return nil, fmt.Errorf("controlplane: existing database required: %s", path)
+	}
+	return open(path, true)
+}
+
+func open(path string, existing bool) (*Store, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	location := &url.URL{Scheme: "file", Path: absolute}
+	query := url.Values{"_pragma": {"busy_timeout(5000)", "journal_mode(WAL)", "foreign_keys(ON)"}}
+	if existing {
+		query.Set("mode", "rw")
+	}
+	location.RawQuery = query.Encode()
+	dsn := location.String()
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: open db: %w", err)
@@ -83,11 +109,47 @@ func Open(path string) (*Store, error) {
 	db.SetMaxOpenConns(1)
 
 	s := &Store{db: db, now: time.Now}
-	if err := s.migrate(context.Background()); err != nil {
+	if existing {
+		err = s.validateExisting(context.Background())
+	} else {
+		err = s.migrate(context.Background())
+	}
+	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return s, nil
+}
+
+func (s *Store) validateExisting(ctx context.Context) error {
+	for _, query := range []string{
+		"SELECT id,name,status,spa,quota_bytes,created_at,updated_at FROM projects LIMIT 0",
+		"SELECT id,email,password_hash,updated_at FROM superuser LIMIT 0",
+		"SELECT key,value FROM kv LIMIT 0",
+		"SELECT credential_id,label,data,created_at FROM superuser_passkeys LIMIT 0",
+		"SELECT email,password_hash,created_at FROM collaborators LIMIT 0",
+		"SELECT email,project_id,created_at FROM collaborator_projects LIMIT 0",
+		"SELECT token_hash,email,project_id,expires_at,created_at FROM invitations LIMIT 0",
+		"SELECT id,project_id,label,key_hash,created_at,last_used_at,expires_at FROM api_keys LIMIT 0",
+		"SELECT id,project_id,schedule,path,enabled,created_at,updated_at,last_run_at,last_status,last_error FROM cron_jobs LIMIT 0",
+	} {
+		rows, err := s.db.QueryContext(ctx, query)
+		if err != nil {
+			return fmt.Errorf("controlplane: existing schema validation: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+	}
+	var encoded string
+	if err := s.db.QueryRowContext(ctx, "SELECT value FROM kv WHERE key='session_key'").Scan(&encoded); err != nil {
+		return fmt.Errorf("controlplane: existing session key required: %w", err)
+	}
+	key, err := hex.DecodeString(encoded)
+	if err != nil || len(key) != 32 {
+		return errors.New("controlplane: invalid existing session key")
+	}
+	return nil
 }
 
 // Close releases the underlying database.

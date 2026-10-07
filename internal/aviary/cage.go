@@ -1,6 +1,7 @@
 package aviary
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -55,8 +56,7 @@ func (c *cage) start(projectsDir string, log *slog.Logger) error {
 	// Register passkey/WebAuthn endpoints before the handler is built, so the
 	// OnServe hook fires during buildHandler.
 	if err := passkey.Setup(app); err != nil {
-		_ = app.ResetBootstrapState()
-		return err
+		return errors.Join(err, terminateProject(app))
 	}
 
 	// Enable PocketBase JS hooks from the project's pb_hooks directory. The
@@ -81,8 +81,7 @@ func (c *cage) start(projectsDir string, log *slog.Logger) error {
 
 	handler, err := buildHandler(app, filepath.Join(dir, "pb_public"), c.spa)
 	if err != nil {
-		_ = app.ResetBootstrapState()
-		return err
+		return errors.Join(err, terminateProject(app))
 	}
 
 	c.app = app
@@ -97,9 +96,16 @@ func (c *cage) stop(log *slog.Logger) {
 	if c.app == nil {
 		return
 	}
-	if err := c.app.ResetBootstrapState(); err != nil {
+	if err := terminateProject(c.app); err != nil {
 		log.Warn("error stopping project", "project", c.id, "error", err)
 	}
+}
+
+func terminateProject(app core.App) error {
+	event := &core.TerminateEvent{App: app}
+	return app.OnTerminate().Trigger(event, func(e *core.TerminateEvent) error {
+		return e.App.ResetBootstrapState()
+	})
 }
 
 func (c *cage) touch() {

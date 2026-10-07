@@ -63,6 +63,28 @@ set), which makes headless/container deployment easy:
 | `--idle-ttl` | `AVIARY_IDLE_TTL`   | `5m`               |
 | `--seed`     | `AVIARY_SEED`       | _(empty)_          |
 | `--allow-dashboard-password` | `AVIARY_PB_PASSWORD_LOGIN` | `false` |
+| `--require-existing` | `AVIARY_REQUIRE_EXISTING` | `false` |
+| `--disable-cron` | `AVIARY_DISABLE_CRON` | `false` |
+
+Managed installations can require the existing control database, projects
+directory and persisted session key. This mode validates the control schema
+without creating or migrating it; new project provisioning remains deliberate.
+Default development startup still bootstraps an empty installation.
+`--disable-cron` disables control-plane scheduling for isolated copied-state
+rehearsals; it does not block ordinary requests or replace outbound isolation.
+
+SIGTERM and SIGINT now stop new requests and scheduled invocations, disconnect
+PocketBase realtime streams, and drain accepted HTTP/cron work before closing
+project and control stores. PocketBase termination hooks flush queued logs and
+stop its background logger before database reset. A slow drain is diagnosed
+after 30 seconds and continues waiting rather than discarding accepted writes.
+`/_aviary/health` reports the build revision, project count and scheduling mode
+without starting any project or issuing a login cookie.
+
+The operator systemd unit is in `deploy/aviary.service`. The original production
+binary exactly matches the official v0.4.0 release pinned in `deploy/vendor.json`;
+its dirty metadata is vendor build metadata, not evidence of local changes.
+The managed runtime patch retains Go 1.25.0 and the existing dependency versions.
 
 Set `AVIARY_SUPERUSER_EMAIL` and `AVIARY_SUPERUSER_PASSWORD` to bootstrap the
 control-plane superuser on first run without using the web setup flow (ignored

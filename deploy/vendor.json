@@ -1,0 +1,8 @@
+{
+  "version": "0.4.0",
+  "source_revision": "8a7d60b6e43a1a7a3417a80e5038b1a74e61aafe",
+  "go_version": "1.25.0",
+  "archive_url": "https://github.com/tupini07/aviary/releases/download/v0.4.0/aviary_0.4.0_linux_amd64.zip",
+  "archive_sha256": "cd92f7b0b4fb845997d9be9a19e083d63a3256593bb249b9b45ce17a6e64580b",
+  "binary_sha256": "13200be63d2ba3aaecc5d8d2c8663c11bbe8e3a40e147b7c46fdbf7b3796e019"
+}

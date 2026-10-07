@@ -1,0 +1,40 @@
+[Unit]
+Description=Aviary multi-project backend
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/mnt/volume-hel1-1
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=exec
+User=aviary
+Group=aviary
+WorkingDirectory=/opt/aviary/current
+EnvironmentFile=/etc/aviary/aviary.env
+ExecStartPre=/usr/bin/test -s /mnt/volume-hel1-1/aviary-state/control.db
+ExecStartPre=/usr/bin/test -d /mnt/volume-hel1-1/aviary-state/projects
+ExecStart=/opt/aviary/current/aviary
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=660
+KillMode=mixed
+SendSIGKILL=no
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/mnt/volume-hel1-1/aviary-state
+
+[Install]
+WantedBy=multi-user.target

@@ -77,6 +77,10 @@ func (a *Aviary) unscheduleCronJob(id string) {
 // A tick is skipped (logged) when the previous run of the same job is still in
 // flight, matching the "no overlap" semantics of typical cron runners.
 func (a *Aviary) runCronJob(projectID, id string) {
+	if !a.beginWork() {
+		return
+	}
+	defer a.work.Done()
 	a.cronMu.Lock()
 	if _, busy := a.cronRunning[id]; busy {
 		a.cronMu.Unlock()
