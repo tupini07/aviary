@@ -1,5 +1,7 @@
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import copy
+import hashlib
 import io
 import json
 import os
@@ -7,7 +9,6 @@ from pathlib import Path
 import shutil
 import signal
 import sqlite3
-import copy
 import subprocess
 import tarfile
 import tempfile
@@ -480,6 +481,26 @@ class ArchiveAndConfigurationTests(TemporaryTest):
 
 
 class HTTPTests(TemporaryTest):
+    def test_public_ui_keeps_every_original_byte_and_accepts_only_pinned_edge_insertion(self):
+        ui = b"<html><body><script>owned application</script></body></html>"
+        insertion = (b"<script>window.__CF$cv$params={r:'0123456789abcdef',t:'MTIz'};</script>"
+                     b"<script data-beacon='{\"token\":\"0123456789abcdef0123456789abcdef\"}'></script>")
+        normalized = insertion.replace(b"0123456789abcdef',t:'MTIz", b"RAY',t:'TIME").replace(
+            b"0123456789abcdef0123456789abcdef", b"SITE")
+        observed = ui.replace(b"</body>", insertion + b"</body>")
+        with patch.object(d, "CF_UI_INSERTION_SHA256", hashlib.sha256(normalized).hexdigest()):
+            self.assertTrue(d.public_ui_matches(observed, ui))
+            self.assertTrue(d.public_ui_matches(ui, ui))
+            for bad in (observed.replace(b"owned application", b"changed application"),
+                        observed.replace(b"</body>", b"<script>unreviewed()</script></body>"),
+                        observed.replace(b"MTIz", b"';unreviewed()"),
+                        observed + b"<script>unreviewed()</script>",
+                        ui.replace(b"</body>", b"x" * 9000 + b"</body>")):
+                self.assertFalse(d.public_ui_matches(bad, ui))
+            with patch.object(d, "request", return_value=(200, observed)):
+                with self.assertRaises(d.DeploymentError):
+                    d.check_http("http://backend", ui)
+
     def test_required_health_and_exact_embedded_ui_no_redirects_wrong_mime_body_or_modes(self):
         state = {"status": 200, "mime": "application/json", "redirect": False,
                  "health": {"status": "ok", "revision": REVISION, "version": d.VERSION,
@@ -533,6 +554,48 @@ class HTTPTests(TemporaryTest):
 
 
 class LegacyGuardTests(TemporaryTest):
+    def test_init_is_never_signalled_even_if_an_identity_is_supplied(self):
+        with patch.object(d.os, "pidfd_open") as open_pid:
+            with self.assertRaisesRegex(d.DeploymentError, "Never signal init"):
+                d.stop_exact({"pid": 1}, {"pid": 0})
+            open_pid.assert_not_called()
+
+    def test_recovery_retry_requires_matching_nonrestarting_reviewed_service_and_absolute_argv(self):
+        stage = self.root / "receipt"
+        stage.mkdir()
+        installer = d.Installer(stage, self.root / "system")
+        name = "aviary-legacy-recovery-" + "a" * 32 + ".service"
+        metadata = {"legacy_pid": 123, "parent_pid": 1, "legacy_sha256": d.VENDOR["binary_sha256"],
+                    "legacy_recovery_unit": name}
+        app = {"pid": 123, "parent": 1, "exe": str(installer.legacy / "aviary"),
+               "cwd": str(installer.legacy), "sha256": d.VENDOR["binary_sha256"],
+               "argv": [d.base64.b64encode(str(installer.legacy / "aviary").encode()).decode()]}
+        parent = {"pid": 1}
+        values = {"MainPID": "123", "Restart": "no", "SendSIGKILL": "no", "DropInPaths": ""}
+
+        def run(arguments):
+            return "active" if arguments[1] == "is-active" else values[arguments[-2]]
+
+        with patch.object(d, "process_identity", side_effect=lambda pid: app if pid == 123 else parent), \
+                patch.object(Path, "read_bytes", return_value=b""), \
+                patch.object(d, "checksum", return_value=d.VENDOR["binary_sha256"]), \
+                patch.object(installer, "run", side_effect=run):
+            self.assertEqual(installer.legacy_identity(metadata), {"app": app, "parent": parent})
+            for key, value in (("MainPID", "124"), ("Restart", "always"), ("SendSIGKILL", "yes"),
+                               ("DropInPaths", "/operator.conf")):
+                old = values[key]
+                values[key] = value
+                with self.assertRaises(d.DeploymentError):
+                    installer.legacy_identity(metadata)
+                values[key] = old
+            for invalid in (dict(metadata, legacy_recovery_unit="unrelated.service"),
+                            dict(metadata, legacy_recovery_unit=None)):
+                with self.assertRaises(d.DeploymentError):
+                    installer.legacy_identity(invalid)
+            app["argv"] = [d.base64.b64encode(b"./aviary").decode()]
+            with self.assertRaises(d.DeploymentError):
+                installer.legacy_identity(metadata)
+
     def test_changed_process_or_parent_never_signalled(self):
         original = {"pid": 123, "start": "original"}
         with patch.object(d.os, "pidfd_open", return_value=987), \

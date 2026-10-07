@@ -123,6 +123,14 @@ any logical state change invalidates the review immediately. The final review
 window is checked again immediately before exact-process stop, and stopped state
 must equal the reviewed quiet state.
 
+Backend and copied UI checks require the exact complete committed HTML bytes.
+Public checks additionally permit only the reviewed Cloudflare analytics/JS
+detection insertion before `</body>`, pinned by a normalized SHA256 after
+replacing dynamic challenge parameters and the public beacon identifier.
+Every original HTML byte must remain unchanged. Other injections, changed
+assets or future Cloudflare script changes fail closed; this does not accept
+arbitrary scripts or HTML and does not change Cloudflare settings.
+
 ## Managed layout and transaction
 
 The runtime unit is committed in `deploy/aviary.service`. The installer uses:
@@ -242,6 +250,13 @@ directory. Only that executable is launched by a new transient
 The unused managed copy is retained; a future initial migration sees that partial
 layout and requires deliberate receipt/layout review. The uploaded official zip
 is recovery evidence, not permission to overwrite a changed original.
+After that review, preserve the unused managed copy in a named private recovery
+receipt, confirm original config and routing were restored, and recapture current
+original state/schedules. Initial mode can then use the new exact recovery PID,
+`--parent-pid 1`, and `--legacy-recovery-unit <receipt's exact unit>`. Only a
+matching active non-restarting `aviary-legacy-recovery-<32hex>.service` without
+drop-ins is accepted; its exact absolute argv/hash/cwd and original defaults
+are verified. The updater never signals init or the preserved tmux shell.
 
 Any accepted database row/schema/file change, new project, state permission
 change, operator configuration edit, unknown pointer, altered release or

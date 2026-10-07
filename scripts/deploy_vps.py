@@ -62,6 +62,7 @@ UNSET_LEGACY_ENVIRONMENT = " ".join([
     "AVIARY_SUPERUSER_EMAIL", "AVIARY_SUPERUSER_PASSWORD",
 ])
 QUIET_SECONDS = 60
+CF_UI_INSERTION_SHA256 = "3956c750c7ec2b5fb0be6eba2dbcf54c9cb21d2754e95626413ae61ede7d73bd"
 
 
 class DeploymentError(RuntimeError):
@@ -467,9 +468,28 @@ def health(origin, revision, cron_enabled, projects):
             "Health revision/version/inventory/mode mismatch")
 
 
-def check_http(origin, ui):
+def public_ui_matches(body, ui):
+    if body == ui:
+        return True
+    if ui.count(b"</body>") != 1:
+        return False
+    position = ui.index(b"</body>")
+    suffix = ui[position:]
+    if not body.startswith(ui[:position]) or not body.endswith(suffix):
+        return False
+    insertion = body[position:len(body) - len(suffix)]
+    if len(insertion) > 8192:
+        return False
+    normalized, challenges = re.subn(
+        rb"window\.__CF\$cv\$params=\{r:'[0-9a-f]{16}',t:'[A-Za-z0-9+/=]{1,128}'\}",
+        b"window.__CF$cv$params={r:'RAY',t:'TIME'}", insertion)
+    normalized, beacons = re.subn(rb'"token":"[0-9a-f]{32}"', b'"token":"SITE"', normalized)
+    return challenges == beacons == 1 and hashlib.sha256(normalized).hexdigest() == CF_UI_INSERTION_SHA256
+
+
+def check_http(origin, ui, *, public=False):
     code, body = request(origin + "/", "text/html")
-    require(code == 200 and body == ui and b"<html" in body.lower()
+    require(code == 200 and (public_ui_matches(body, ui) if public else body == ui) and b"<html" in body.lower()
             and b"<script" in body.lower(), "Embedded control UI/assets mismatch")
     code, body = request(origin + "/api/auth/session", "application/json")
     try:
@@ -565,7 +585,7 @@ def release_files(release):
 
 
 def process_identity(pid):
-    require(type(pid) is int and pid > 1, "Invalid process ID")
+    require(type(pid) is int and pid > 0, "Invalid process ID")
     path = Path("/proc") / str(pid)
     fields = (path / "stat").read_text().rsplit(") ", 1)[1].split()
     return {"pid": pid, "parent": int(fields[1]), "start": fields[19],
@@ -576,6 +596,7 @@ def process_identity(pid):
 
 
 def stop_exact(expected, parent):
+    require(type(expected.get("pid")) is int and expected["pid"] > 1, "Never signal init")
     require(hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"),
             "Safe initial stop requires Linux pidfd support")
     descriptor = os.pidfd_open(expected["pid"])
@@ -850,8 +871,22 @@ class Installer:
     def legacy_identity(self, metadata):
         app = process_identity(metadata["legacy_pid"])
         parent = process_identity(metadata["parent_pid"])
+        recovery = metadata.get("legacy_recovery_unit")
+        argv = b"./aviary"
+        if recovery:
+            require(isinstance(recovery, str) and re.fullmatch(r"aviary-legacy-recovery-[0-9a-f]{32}\.service", recovery)
+                    and parent["pid"] == 1, "Unreviewed legacy recovery service")
+            require(self.run(["systemctl", "show", recovery, "-p", "MainPID", "--value"]) == str(app["pid"])
+                    and self.run(["systemctl", "is-active", recovery]) == "active"
+                    and self.run(["systemctl", "show", recovery, "-p", "Restart", "--value"]) == "no"
+                    and self.run(["systemctl", "show", recovery, "-p", "SendSIGKILL", "--value"]) == "no"
+                    and not self.run(["systemctl", "show", recovery, "-p", "DropInPaths", "--value"]),
+                    "Legacy recovery ownership/restart/stop contract changed")
+            argv = str(self.legacy / "aviary").encode("ascii")
+        else:
+            require(parent["pid"] > 1, "Init parent requires an explicitly reviewed legacy recovery service")
         require(app["exe"] == str(self.legacy / "aviary") and app["cwd"] == str(self.legacy)
-                and app["argv"] == [base64.b64encode(b"./aviary").decode("ascii")]
+                and app["argv"] == [base64.b64encode(argv).decode("ascii")]
                 and app["parent"] == parent["pid"]
                 and app["sha256"] == metadata["legacy_sha256"] == VENDOR["binary_sha256"],
                 "Legacy identity differs from reviewed process")
@@ -1309,7 +1344,7 @@ class Installer:
                 self.check_process(previous)
             if not initial and self.current.resolve() == release:
                 pid = self.check_process(release)
-                check_http(PUBLIC, (release / "control-ui.html").read_bytes())
+                check_http(PUBLIC, (release / "control-ui.html").read_bytes(), public=True)
                 health(PUBLIC, revision, True, project_count(self.data))
                 require(self.run(["systemctl", "is-enabled", "aviary.service"]) == "enabled",
                         "Identical release is not enabled")
@@ -1327,7 +1362,7 @@ class Installer:
                 with self.maintenance():
                     self.activate(release, revision, legacy, watched, proof)
                 health(PUBLIC, revision, True, project_count(self.data))
-                check_http(PUBLIC, (release / "control-ui.html").read_bytes())
+                check_http(PUBLIC, (release / "control-ui.html").read_bytes(), public=True)
                 self.check_dropins()
                 require(self.configuration_records() == self.transaction["installed"],
                         "Operator changed configuration during public verification")
@@ -1425,15 +1460,20 @@ def deploy(args):
     require(args.yes, "Use --yes after reviewing the guarded deployment")
     if args.migrate_tmux:
         require(type(args.legacy_pid) is int and args.legacy_pid > 1
-                and type(args.parent_pid) is int and args.parent_pid > 1
+                and type(args.parent_pid) is int and args.parent_pid >= 1
                 and args.parent_pid != args.legacy_pid and args.legacy_sha256 == VENDOR["binary_sha256"],
                 "Initial migration requires exact --legacy-pid, --parent-pid and official --legacy-sha256")
         require(args.rehearse or (args.accept_legacy_shutdown_risk and args.legacy_schedule_review),
                 "Initial activation requires --accept-legacy-shutdown-risk and --legacy-schedule-review; "
                 "quiet sockets cannot prove absence of pending legacy work")
+        require((args.parent_pid > 1 and not args.legacy_recovery_unit)
+                or (args.parent_pid == 1 and args.legacy_recovery_unit
+                    and re.fullmatch(r"aviary-legacy-recovery-[0-9a-f]{32}\.service", args.legacy_recovery_unit)),
+                "Recovery retries require the exact reviewed --legacy-recovery-unit and init parent")
     else:
         require(not any((args.legacy_pid, args.parent_pid, args.legacy_sha256,
-                         args.legacy_schedule_review, args.accept_legacy_shutdown_risk, args.vendor_archive)),
+                         args.legacy_schedule_review, args.accept_legacy_shutdown_risk,
+                         args.legacy_recovery_unit, args.vendor_archive)),
                 "Legacy arguments are only valid with --migrate-tmux")
     repository = Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory(prefix="aviary-deploy-") as temporary:
@@ -1456,6 +1496,7 @@ def deploy(args):
             "rehearse": args.rehearse, "legacy_pid": args.legacy_pid, "parent_pid": args.parent_pid,
             "legacy_sha256": args.legacy_sha256, "schedule_review_sha256": proof_hash,
             "legacy_shutdown_risk_accepted": args.accept_legacy_shutdown_risk,
+            "legacy_recovery_unit": args.legacy_recovery_unit,
         })
         uploads.append(directory / "request.json")
         identifier = uuid.uuid4().hex
@@ -1484,6 +1525,7 @@ def parser():
     result.add_argument("--vendor-archive", type=Path)
     result.add_argument("--legacy-schedule-review", type=Path)
     result.add_argument("--accept-legacy-shutdown-risk", action="store_true")
+    result.add_argument("--legacy-recovery-unit")
     return result
 
 
