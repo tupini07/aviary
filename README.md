@@ -85,6 +85,9 @@ The operator systemd unit is in `deploy/aviary.service`. The original production
 binary exactly matches the official v0.4.0 release pinned in `deploy/vendor.json`;
 its dirty metadata is vendor build metadata, not evidence of local changes.
 The managed runtime patch retains Go 1.25.0 and the existing dependency versions.
+The repository-owned VPS updater and guarded migration/recovery procedure are
+documented in [systemd operations](docs/systemd.md). Managed installations use
+that updater, not `aviary update`, which replaces a standalone executable.
 
 Set `AVIARY_SUPERUSER_EMAIL` and `AVIARY_SUPERUSER_PASSWORD` to bootstrap the
 control-plane superuser on first run without using the web setup flow (ignored
