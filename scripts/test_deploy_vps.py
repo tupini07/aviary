@@ -510,13 +510,19 @@ class ArchiveAndConfigurationTests(TemporaryTest):
 class HTTPTests(TemporaryTest):
     def test_public_ui_keeps_every_original_byte_and_accepts_only_pinned_edge_insertion(self):
         ui = b"<html><body><script>owned application</script></body></html>"
-        insertion = (b"<script>window.__CF$cv$params={r:'0123456789abcdef',t:'MTIz'};</script>"
-                     b"<script data-beacon='{\"token\":\"0123456789abcdef0123456789abcdef\"}'></script>")
-        normalized = insertion.replace(b"0123456789abcdef',t:'MTIz", b"RAY',t:'TIME").replace(
-            b"0123456789abcdef0123456789abcdef", b"SITE")
+        challenge = b"<script>window.__CF$cv$params={r:'0123456789abcdef',t:'MTIz'};</script>"
+        beacon = b"<script data-beacon='{\"token\":\"0123456789abcdef0123456789abcdef\"}'></script>"
+        insertion = challenge + beacon
+        reordered = beacon + b"\n" + challenge
+        fingerprints = {
+            hashlib.sha256(value.replace(b"0123456789abcdef',t:'MTIz", b"RAY',t:'TIME").replace(
+                b"0123456789abcdef0123456789abcdef", b"SITE")).hexdigest()
+            for value in (insertion, reordered)
+        }
         observed = ui.replace(b"</body>", insertion + b"</body>")
-        with patch.object(d, "CF_UI_INSERTION_SHA256", hashlib.sha256(normalized).hexdigest()):
+        with patch.object(d, "CF_UI_INSERTION_SHA256", fingerprints):
             self.assertTrue(d.public_ui_matches(observed, ui))
+            self.assertTrue(d.public_ui_matches(ui.replace(b"</body>", reordered + b"</body>"), ui))
             self.assertTrue(d.public_ui_matches(ui, ui))
             for bad in (observed.replace(b"owned application", b"changed application"),
                         observed.replace(b"</body>", b"<script>unreviewed()</script></body>"),

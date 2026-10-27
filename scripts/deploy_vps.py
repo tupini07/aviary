@@ -62,7 +62,10 @@ UNSET_LEGACY_ENVIRONMENT = " ".join([
     "AVIARY_SUPERUSER_EMAIL", "AVIARY_SUPERUSER_PASSWORD",
 ])
 QUIET_SECONDS = 60
-CF_UI_INSERTION_SHA256 = "e0d8fcd57e5d74a55ae7ac7162d43f4aaa6e0542ff38c76adeab8b3a2a389b4e"
+CF_UI_INSERTION_SHA256 = {
+    "e0d8fcd57e5d74a55ae7ac7162d43f4aaa6e0542ff38c76adeab8b3a2a389b4e",
+    "6ca2bd741e8305d45b523bdbac3bfb5b2ea03e03729b5aedecaa769806c132f5",
+}
 
 
 class DeploymentError(RuntimeError):
@@ -498,7 +501,7 @@ def public_ui_matches(body, ui):
         rb"window\.__CF\$cv\$params=\{r:'[0-9a-f]{16}',t:'[A-Za-z0-9+/=]{1,128}'\}",
         b"window.__CF$cv$params={r:'RAY',t:'TIME'}", insertion)
     normalized, beacons = re.subn(rb'"token":"[0-9a-f]{32}"', b'"token":"SITE"', normalized)
-    return challenges == beacons == 1 and hashlib.sha256(normalized).hexdigest() == CF_UI_INSERTION_SHA256
+    return challenges == beacons == 1 and hashlib.sha256(normalized).hexdigest() in CF_UI_INSERTION_SHA256
 
 
 def check_http(origin, ui, *, public=False):
