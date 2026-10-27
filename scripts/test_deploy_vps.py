@@ -394,12 +394,12 @@ class ArchiveAndConfigurationTests(TemporaryTest):
         with self.assertRaises(d.DeploymentError):
             d.backup_configuration(text, unit + 'ReadWritePaths="/other"\n')
 
-    def test_maintenance_changes_only_exact_line_75(self):
-        original = "unrelated configuration\n" * 74 + "\t reverse_proxy :8090\nother { reverse_proxy :9000 }\n"
+    def test_maintenance_changes_only_exact_line_80(self):
+        original = "unrelated configuration\n" * 79 + "\t reverse_proxy :8090\nother { reverse_proxy :9000 }\n"
         candidate = d.maintenance_configuration(original)
-        self.assertEqual(original.splitlines()[:74], candidate.splitlines()[:74])
-        self.assertEqual(original.splitlines()[75:], candidate.splitlines()[75:])
-        self.assertIn("503", candidate.splitlines()[74])
+        self.assertEqual(original.splitlines()[:79], candidate.splitlines()[:79])
+        self.assertEqual(original.splitlines()[80:], candidate.splitlines()[80:])
+        self.assertIn("503", candidate.splitlines()[79])
         for broken in (original.replace(":8090", ":8091"),
                        "\n" + original, original + "extra { reverse_proxy :8090 }\n"):
             with self.assertRaises(d.DeploymentError):
@@ -902,7 +902,7 @@ class TransactionTests(TemporaryTest):
             path.mkdir(parents=True, exist_ok=True)
         i.root.chmod(0o755)
         i.caddy.parent.mkdir(parents=True)
-        i.caddy.write_bytes(b"# unrelated Caddy routes\n" * 74 + b"\treverse_proxy :8090\n# other :9000\n")
+        i.caddy.write_bytes(b"# unrelated Caddy routes\n" * 79 + b"\treverse_proxy :8090\n# other :9000\n")
         i.live = i.adaptation(i.caddy)
         text, unit = backup_inputs()
         i.backup_config.write_text(text)

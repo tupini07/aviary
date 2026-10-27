@@ -676,8 +676,8 @@ def validate_schedule_review(proof, legacy, manifest, now):
 def maintenance_configuration(text):
     pattern = r"(?m)^([ \t]*)reverse_proxy :8090[ \t]*(\r?)$"
     matches = list(re.finditer(pattern, text))
-    require(len(matches) == 1 and text[:matches[0].start()].count("\n") + 1 == 75,
-            "Aviary upstream is not the single reviewed line 75")
+    require(len(matches) == 1 and text[:matches[0].start()].count("\n") + 1 == 80,
+            "Aviary upstream is not the single reviewed line 80")
     result = re.sub(pattern, lambda m: m[1] + 'respond "Aviary is temporarily unavailable." 503' + m[2], text)
     require("8090" not in result, "Another Caddy route/comment references Aviary; review first")
     return result
