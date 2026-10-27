@@ -36,7 +36,7 @@ DATA = Path("/mnt/volume-hel1-1/aviary-state")
 ROOT = Path("/opt/aviary")
 ENV = Path("/etc/aviary/aviary.env")
 PUBLIC = "https://aviary-console.meadow.cafe"
-TOOLCHAIN = "go1.25.0"
+TOOLCHAIN = "go1.27.3"
 VERSION = "0.4.0-managed.1"
 VENDOR = {
     "version": "0.4.0",
@@ -1440,7 +1440,7 @@ def build_source(repository, directory):
     environment = dict(os.environ, GOTOOLCHAIN=TOOLCHAIN, GOOS="linux", GOARCH="amd64",
                        GOAMD64="v1", GOEXPERIMENT="", GOENV="off", GOFLAGS="", GOWORK="off", CGO_ENABLED="0")
     require(subprocess.check_output(["go", "version"], env=environment, text=True).strip()
-            == "go version go1.25.0 linux/amd64", "Use pinned native Go1.25.0")
+            == "go version go1.27.3 linux/amd64", "Use pinned native Go1.27.3")
     subprocess.run(["go", "test", "-mod=readonly", "-count=1", "-timeout=5m", "./..."],
                    cwd=source, env=environment, check=True)
     subprocess.run(["go", "test", "-mod=readonly", "-race", "-count=1", "-timeout=5m", "./..."],

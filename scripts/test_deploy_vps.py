@@ -742,7 +742,7 @@ class ClientBuildTests(TemporaryTest):
 
         def output(arguments, **kwargs):
             if arguments[0] == "go":
-                return "go version go1.25.0 linux/amd64\n"
+                return "go version go1.27.3 linux/amd64\n"
             if arguments[3] == "status":
                 self.assertIn("--untracked-files=no", arguments)
                 return ""
@@ -772,7 +772,7 @@ class ClientBuildTests(TemporaryTest):
         self.assertIn("-race", go[1][0])
         for args, env in go:
             self.assertIn("-mod=readonly", args)
-            self.assertEqual(env["GOTOOLCHAIN"], "go1.25.0")
+            self.assertEqual(env["GOTOOLCHAIN"], "go1.27.3")
             self.assertEqual(env["GOAMD64"], "v1")
             self.assertEqual(env["GOEXPERIMENT"], "")
         build = go[-1][0]
