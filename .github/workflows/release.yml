@@ -12,6 +12,8 @@ jobs:
   goreleaser:
     name: Release
     runs-on: ubuntu-latest
+    env:
+      GOEXPERIMENT: nojsonv2
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,7 +23,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.27.3"
           cache: true
 
       - name: Run GoReleaser

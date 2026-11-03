@@ -50,7 +50,7 @@ Projects must be provisioned before they serve traffic. For local development
 the `--seed` flag auto-provisions a comma-separated list on startup:
 
 ```sh
-go run . --addr 127.0.0.1:8090 --idle-ttl 5m --seed alpha,beta
+GOTOOLCHAIN=go1.27.3 GOEXPERIMENT=nojsonv2 go run . --addr 127.0.0.1:8090 --idle-ttl 5m --seed alpha,beta
 ```
 
 Every flag has an environment-variable fallback (the flag wins when both are
@@ -84,7 +84,9 @@ without starting any project or issuing a login cookie.
 The operator systemd unit is in `deploy/aviary.service`. The original production
 binary exactly matches the official v0.4.0 release pinned in `deploy/vendor.json`;
 its dirty metadata is vendor build metadata, not evidence of local changes.
-The managed runtime patch retains Go 1.25.0 and the existing dependency versions.
+Managed and release builds use Go 1.27.3 with `GOEXPERIMENT=nojsonv2` and retain
+the existing dependency versions. PocketBase 0.39's collection decoder is
+incompatible with Go 1.27's default JSON v2 implementation.
 The repository-owned VPS updater and guarded migration/recovery procedure are
 documented in [systemd operations](docs/systemd.md). Managed installations use
 that updater, not `aviary update`, which replaces a standalone executable.
@@ -108,7 +110,7 @@ Aviary uses pure-Go SQLite (`modernc.org/sqlite`), so it cross-compiles without
 CGO or a C toolchain. Build a binary locally with:
 
 ```sh
-CGO_ENABLED=0 go build -o aviary .
+GOTOOLCHAIN=go1.27.3 GOEXPERIMENT=nojsonv2 CGO_ENABLED=0 go build -o aviary .
 ./aviary -version
 ```
 
@@ -118,8 +120,9 @@ separate `aviaryctl` download.
 
 Two GitHub workflows automate this:
 
-- **CI** (`.github/workflows/ci.yml`) runs `go vet`, `go build` and the test
-  suite (`go test -race`) on every push and pull request to `main`.
+- **CI** (`.github/workflows/ci.yml`) runs `go vet`, `go build`, the Go test
+  suite (`go test -race`), and the guarded deployment's Python tests on every
+  push and pull request to `main`.
 - **Release** (`.github/workflows/release.yml`) runs [GoReleaser] on every
   pushed `v*` tag. It cross-compiles binaries for Linux, macOS and Windows
   (amd64/arm64/arm) and publishes a GitHub Release with zip archives and a

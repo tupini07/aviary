@@ -4,7 +4,7 @@ version: 2
 
 before:
   hooks:
-    - go mod tidy
+    - go mod verify
 
 builds:
   - id: aviary
@@ -12,8 +12,9 @@ builds:
     binary: aviary
     env:
       - CGO_ENABLED=0
+      - GOEXPERIMENT=nojsonv2
     ldflags:
-      - -s -w -X main.version={{ .Version }}
+      - -s -w -X main.version={{ .Version }} -X main.buildRevision={{ .FullCommit }}
     goos:
       - linux
       - darwin
