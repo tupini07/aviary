@@ -10,7 +10,7 @@ dependency upgrade, vendor updater, git-pull loop or generated UI bundle is used
 ## CLI
 
 Run from a native Linux amd64 machine with Python 3.11+, Git, OpenSSH, Go
-`go1.25.0`, and a working C compiler for the race tests. The target needs Python
+`go1.27.3`, and a working C compiler for the race tests. The target needs Python
 3.11+, Linux pidfds and network namespaces, systemd, `nsenter`, Caddy, `ss`,
 an existing Backuper lock, and the mounted
 `/mnt/volume-hel1-1` volume.
@@ -58,9 +58,14 @@ review and risk acknowledgement are rejected outside `--migrate-tmux`.
 
 The build pipeline runs native `CGO_ENABLED=0` non-race Go tests, `CGO_ENABLED=1`
 race tests, Go vet, and the Python regression suite, always with
-`GOTOOLCHAIN=go1.25.0` and `-mod=readonly`. The final build uses `CGO_ENABLED=0`:
+`GOTOOLCHAIN=go1.27.3`, `GOEXPERIMENT=nojsonv2`, and `-mod=readonly`. PocketBase
+0.39's collection decoder is incompatible with Go 1.27's default JSON v2
+implementation; collection creation or updates otherwise cause a fatal stack
+overflow. Keep the legacy decoder pinned until a separately reviewed dependency
+upgrade. The final build uses `CGO_ENABLED=0`:
 
 ```console
+GOTOOLCHAIN=go1.27.3 GOEXPERIMENT=nojsonv2 CGO_ENABLED=0 \
 go build -mod=readonly -trimpath -buildvcs=false \
   -ldflags '-X main.version=0.4.0-managed.1 -X main.buildRevision=<40hex revision>' \
   -o <payload>/aviary .

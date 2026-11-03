@@ -1,6 +1,7 @@
 package aviary
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -51,6 +52,67 @@ func TestProjectAdminTokenMint(t *testing.T) {
 	key := mintKey(t, av, "alpha", sess, createAPIKeyRequest{Label: "migration"})
 	keyTok := mint(doControlBearer(t, av, http.MethodPost, "/api/projects/alpha/admin-token", nil, key.Token))
 	assertTokenIsSuperuser(t, av, "alpha", keyTok.Token)
+}
+
+func TestProjectAdminTokenCollectionWrites(t *testing.T) {
+	av := newTestAviary(t)
+	sess := loginAs(t, av, "admin@example.com", "password123")
+	doControl(t, av, http.MethodPost, "/api/projects", createProjectRequest{ID: "alpha"}, sess)
+	key := mintKey(t, av, "alpha", sess, createAPIKeyRequest{Label: "migration"})
+	rec := doControlBearer(t, av, http.MethodPost, "/api/projects/alpha/admin-token", nil, key.Token)
+	var token adminTokenResp
+	if rec.Code != http.StatusOK {
+		t.Fatalf("mint admin-token: status %d body %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &token); err != nil {
+		t.Fatal(err)
+	}
+
+	type collectionResponse struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Type string `json:"type"`
+	}
+	write := func(t *testing.T, method, path string, body map[string]any) collectionResponse {
+		t.Helper()
+		data, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(method, path, bytes.NewReader(data))
+		req.Host = "alpha.localhost"
+		req.Header.Set("Authorization", "Bearer "+token.Token)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		av.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s %s: status %d body %s", method, path, rec.Code, rec.Body.String())
+		}
+		var result collectionResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	for _, kind := range []string{"base", "auth"} {
+		t.Run(kind, func(t *testing.T) {
+			created := write(t, http.MethodPost, "/api/collections", map[string]any{
+				"name": "write_test_" + kind, "type": kind,
+				"fields": []map[string]any{{"name": "label", "type": "text"}},
+			})
+			if created.ID == "" || created.Name != "write_test_"+kind || created.Type != kind {
+				t.Fatalf("unexpected created collection: %+v", created)
+			}
+			updated := write(t, http.MethodPatch, "/api/collections/"+created.ID, map[string]any{
+				"name": "updated_" + kind,
+			})
+			if updated.ID != created.ID || updated.Name != "updated_"+kind || updated.Type != kind {
+				t.Fatalf("unexpected updated collection: %+v", updated)
+			}
+		})
+	}
+	assertTokenIsSuperuser(t, av, "alpha", token.Token)
 }
 
 // TestProjectAdminTokenScope verifies a key bound to one project cannot mint a

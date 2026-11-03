@@ -780,7 +780,7 @@ class ClientBuildTests(TemporaryTest):
             self.assertIn("-mod=readonly", args)
             self.assertEqual(env["GOTOOLCHAIN"], "go1.27.3")
             self.assertEqual(env["GOAMD64"], "v1")
-            self.assertEqual(env["GOEXPERIMENT"], "")
+            self.assertEqual(env["GOEXPERIMENT"], "nojsonv2")
         build = go[-1][0]
         self.assertIn("-trimpath", build)
         self.assertIn("-buildvcs=false", build)

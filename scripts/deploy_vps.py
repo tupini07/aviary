@@ -1440,8 +1440,9 @@ def build_source(repository, directory):
             ["git", "-C", str(repository), "show", VENDOR["source_revision"] + ":" + name]),
             "Dependency versions differ from approved vendor source: " + name)
     dependencies = {name: checksum(source / name) for name in ("go.mod", "go.sum")}
+    # PocketBase 0.39's collection decoder recurses under Go 1.27's default jsonv2.
     environment = dict(os.environ, GOTOOLCHAIN=TOOLCHAIN, GOOS="linux", GOARCH="amd64",
-                       GOAMD64="v1", GOEXPERIMENT="", GOENV="off", GOFLAGS="", GOWORK="off", CGO_ENABLED="0")
+                       GOAMD64="v1", GOEXPERIMENT="nojsonv2", GOENV="off", GOFLAGS="", GOWORK="off", CGO_ENABLED="0")
     require(subprocess.check_output(["go", "version"], env=environment, text=True).strip()
             == "go version go1.27.3 linux/amd64", "Use pinned native Go1.27.3")
     subprocess.run(["go", "test", "-mod=readonly", "-count=1", "-timeout=5m", "./..."],
