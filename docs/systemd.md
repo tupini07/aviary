@@ -130,8 +130,9 @@ must equal the reviewed quiet state.
 
 Backend and copied UI checks require the exact complete committed HTML bytes.
 Public checks additionally permit only the reviewed Cloudflare analytics/JS
-detection insertion before `</body>`, pinned by a normalized SHA256 after
-replacing dynamic challenge parameters and the public beacon identifier.
+detection insertions before `</body>`, including the challenge-only variant,
+pinned by normalized SHA256 after replacing dynamic challenge parameters,
+the matching script URL ray ID, and the public beacon identifier.
 Every original HTML byte must remain unchanged. Other injections, changed
 assets or future Cloudflare script changes fail closed; this does not accept
 arbitrary scripts or HTML and does not change Cloudflare settings.

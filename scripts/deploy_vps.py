@@ -65,6 +65,7 @@ QUIET_SECONDS = 60
 CF_UI_INSERTION_SHA256 = {
     "e0d8fcd57e5d74a55ae7ac7162d43f4aaa6e0542ff38c76adeab8b3a2a389b4e",
     "6ca2bd741e8305d45b523bdbac3bfb5b2ea03e03729b5aedecaa769806c132f5",
+    "69dd8893936a4d122ab9539efcddaa035fe04cda961ccc480c7a2a75b6d07d64",
 }
 
 
@@ -497,11 +498,15 @@ def public_ui_matches(body, ui):
     insertion = body[position:len(body) - len(suffix)]
     if len(insertion) > 8192:
         return False
-    normalized, challenges = re.subn(
-        rb"window\.__CF\$cv\$params=\{r:'[0-9a-f]{16}',t:'[A-Za-z0-9+/=]{1,128}'\}",
-        b"window.__CF$cv$params={r:'RAY',t:'TIME'}", insertion)
+    params = rb"window\.__CF\$cv\$params=\{r:'([0-9a-f]{16})',t:'[A-Za-z0-9+/=]{1,128}'\}"
+    urls = rb"/cdn-cgi/challenge-platform/scripts/jsd/main\.js\?ray=([0-9a-f]{16})"
+    script_rays = re.findall(urls, insertion)
+    if script_rays and script_rays != re.findall(params, insertion):
+        return False
+    normalized, challenges = re.subn(params, b"window.__CF$cv$params={r:'RAY',t:'TIME'}", insertion)
+    normalized = re.sub(urls, b"/cdn-cgi/challenge-platform/scripts/jsd/main.js?ray=RAY", normalized)
     normalized, beacons = re.subn(rb'"token":"[0-9a-f]{32}"', b'"token":"SITE"', normalized)
-    return challenges == beacons == 1 and hashlib.sha256(normalized).hexdigest() in CF_UI_INSERTION_SHA256
+    return challenges == 1 and beacons <= 1 and hashlib.sha256(normalized).hexdigest() in CF_UI_INSERTION_SHA256
 
 
 def check_http(origin, ui, *, public=False):

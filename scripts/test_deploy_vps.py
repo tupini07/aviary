@@ -508,6 +508,38 @@ class ArchiveAndConfigurationTests(TemporaryTest):
 
 
 class HTTPTests(TemporaryTest):
+    def test_reviewed_challenge_only_template_requires_matching_ray_and_exact_script(self):
+        ui = b"<html><body><script>owned application</script></body></html>"
+        insertion = (
+            b"<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);"
+            b"if(b){var d=b.createElement('script');"
+            b'd.innerHTML="window.__CF$cv$params={r:\'0123456789abcdef\',t:\'MTIz\'};'
+            b"var l=window.parent.location,o;try{o=new URL(l.origin).origin}catch(e){"
+            b"try{o=new URL(new URL(l.href).origin).origin}catch(e){o=''}}"
+            b"var u='/cdn-cgi/challenge-platform/scripts/jsd/main.js?ray=0123456789abcdef',"
+            b"a=document.createElement('script');a.src=o?new URL(u,o).href:u;"
+            b'document.getElementsByTagName(\'head\')[0].appendChild(a);";'
+            b"b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){"
+            b"var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';"
+            b"a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';"
+            b"document.body.appendChild(a);if('loading'!==document.readyState)c();"
+            b"else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);"
+            b"else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){"
+            b"e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>"
+        )
+        observed = ui.replace(b"</body>", insertion + b"</body>")
+        self.assertTrue(d.public_ui_matches(observed, ui))
+        self.assertTrue(d.public_ui_matches(observed.replace(
+            b"0123456789abcdef", b"fedcba9876543210").replace(b"MTIz", b"NDU2"), ui))
+        for bad in (
+            observed.replace(b"ray=0123456789abcdef", b"ray=fedcba9876543210"),
+            observed.replace(b"/cdn-cgi/challenge-platform", b"https://unreviewed.invalid"),
+            observed.replace(b"var l=window.parent.location", b"unreviewed();var l=window.parent.location"),
+            observed.replace(b"owned application", b"changed application"),
+            observed.replace(b"</body>", b"<script>unreviewed()</script></body>"),
+        ):
+            self.assertFalse(d.public_ui_matches(bad, ui))
+
     def test_public_ui_keeps_every_original_byte_and_accepts_only_pinned_edge_insertion(self):
         ui = b"<html><body><script>owned application</script></body></html>"
         challenge = b"<script>window.__CF$cv$params={r:'0123456789abcdef',t:'MTIz'};</script>"
